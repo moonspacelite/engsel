@@ -1,10 +1,3 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
-#
-# OpenWrt Package Makefile untuk engsel (me-cli-sunset port C)
-# INI BUKAN GNU Makefile biasa! Ini adalah OpenWrt Package Makefile.
-# Letakkan di: package/engsel/Makefile (dalam OpenWrt SDK)
-#
-
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=engsel
@@ -17,19 +10,18 @@ include $(INCLUDE_DIR)/package.mk
 define Package/engsel
   SECTION:=utils
   CATEGORY:=Utilities
-  TITLE:=engsel - XL Axiata CLI client (C port)
-  URL:=https://github.com/youruser/me-cli-sunset-c
-  MAINTAINER:=Rofiq
+  TITLE:=engsel - Klien CLI untuk penyedia layanan internet seluler tertentu di Indonesia
+  URL:=https://github.com/moonspacelite/engsel
+  MAINTAINER:=0x
   DEPENDS:=+libcurl +libopenssl +libpthread
 endef
 
 define Package/engsel/description
-  CLI client untuk XL Axiata (me-cli-sunset porting ke C).
+  Klien CLI untuk penyedia layanan internet seluler tertentu di Indonesia.
   Jalankan dengan mengetik "engsel" di terminal.
   Data konfigurasi disimpan di /etc/engsel/
 endef
 
-# Salin seluruh isi folder src/ (src/, include/, Makefile) ke build dir
 define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)
 	$(CP) ./src/. $(PKG_BUILD_DIR)/
@@ -60,7 +52,6 @@ define Package/engsel/install
 	$(INSTALL_DATA) ./files/etc/engsel/decoy_data/decoy-priohybrid-balance.json $(1)/etc/engsel/decoy_data/decoy-priohybrid-balance.json
 endef
 
-# File-file ini akan dipreservasi saat upgrade (tidak ditimpa opkg/apk)
 define Package/engsel/conffiles
 /etc/engsel/.env
 /etc/engsel/refresh-tokens.json
