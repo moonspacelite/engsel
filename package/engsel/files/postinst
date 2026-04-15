@@ -1,0 +1,19 @@
+#!/bin/sh
+
+mkdir -p /etc/engsel/hot_data
+mkdir -p /etc/engsel/decoy_data
+
+if [ ! -s /etc/engsel/refresh-tokens.json ]; then
+	echo "[]" >/etc/engsel/refresh-tokens.json
+fi
+
+if [ ! -f /etc/engsel/bookmark.json ]; then
+	echo "[]" >/etc/engsel/bookmark.json
+fi
+
+chmod 755 /etc/engsel
+chmod 644 /etc/engsel/.env
+chmod 644 /etc/engsel/refresh-tokens.json
+chmod 644 /etc/engsel/bookmark.json
+
+echo "engsel: Instalasi selesai. Ketik 'engsel' untuk memulai."
