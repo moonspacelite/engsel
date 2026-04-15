@@ -368,9 +368,19 @@ void print_package_details(cJSON* d_data, const char* f_code, const char* opt_co
     printf("-------------------------------------------------------\n");
 }
 
+// Helper kecil untuk membaca input integer dengan validasi
+static int read_int_input(const char* prompt) {
+    char buf[32];
+    printf("%s", prompt); fflush(stdout);
+    if (!fgets(buf, sizeof(buf), stdin)) return -1;
+    buf[strcspn(buf, "\n")] = 0;
+    clean_input_string(buf);
+    return atoi(buf);
+}
+
 void handle_payment_menu(const char* B_CIAM, const char* B_API, const char* B_AUTH, const char* UA, const char* API_KEY, const char* XDATA_KEY, const char* X_API_SEC, const char* ENC_FIELD_KEY, cJSON* tokens_arr, const char* opt_code, int price, const char* name, const char* conf, const char* p_for, cJSON* bm_info, int* goto_main_flag) {
     while (1) {
-        printf("Pilih Metode:\n1. Beli dengan Pulsa Biasa\n2. Beli dengan Pulsa + Decoy (Bypass / Prio Pass)\n3. Pulsa N kali\n");
+        printf("Pilih Metode:\n1. Beli dengan Pulsa Biasa\n2. Beli dengan Pulsa + Decoy (Bypass / Prio Pass)\n3. Pulsa N kali\n4. E-Wallet (DANA/ShopeePay/GoPay/OVO)\n5. QRIS\n");
         if (bm_info) printf("0. Tambahkan paket ke bookmark\n");
         printf("00. Kembali ke menu sebelumnya\n99. Kembali ke menu utama\nPilihan: "); fflush(stdout);
         char pay_choice[16];
@@ -401,12 +411,13 @@ void handle_payment_menu(const char* B_CIAM, const char* B_API, const char* B_AU
             }
         }
         else if (strcmp(pay_choice, "1") == 0) {
-            printf("Total amount is %d.\n", price);
-            printf("Enter new amount if you need to overwrite.\nPress enter to ignore & use default amount: "); fflush(stdout);
-            char ow_str[32]; int final_price = price;
+            int final_price = price;
+            printf("Total amount is %d.\nEnter new amount if you need to overwrite.\nPress enter to ignore & use default amount: ", price);
+            fflush(stdout);
+            char ow_str[32];
             if (fgets(ow_str, sizeof(ow_str), stdin) != NULL) {
                 ow_str[strcspn(ow_str, "\n")] = 0; clean_input_string(ow_str);
-                if (strlen(ow_str) > 0) { final_price = atoi(ow_str); }
+                if (strlen(ow_str) > 0) final_price = atoi(ow_str);
             }
             cJSON* buy_res = execute_balance_purchase(B_API, API_KEY, XDATA_KEY, X_API_SEC, ENC_FIELD_KEY, id_tok, acc_tok, opt_code, price, name, conf, NULL, 0, NULL, NULL, p_for, final_price, 0);
             if (buy_res) { printf("\nSTATUS TRANSAKSI:\n"); char* out = cJSON_Print(buy_res); printf("%s\n", out); free(out); cJSON_Delete(buy_res); }
@@ -506,8 +517,97 @@ void handle_payment_menu(const char* B_CIAM, const char* B_API, const char* B_AU
             }
             if (decoy) cJSON_Delete(decoy);
         }
+        // ========== TAMBAHAN BARU: E-WALLET ==========
+        else if (strcmp(pay_choice, "4") == 0) {
+            printf("\nPilih E-Wallet:\n1. DANA\n2. ShopeePay\n3. GoPay\n4. OVO\nPilihan: ");
+            fflush(stdout);
+            char ew[8];
+            if (!fgets(ew, sizeof(ew), stdin)) continue;
+            ew[strcspn(ew, "\n")] = 0;
+            const char* method = NULL;
+            char wallet[32] = "";
+            if (strcmp(ew, "1") == 0) method = "DANA";
+            else if (strcmp(ew, "2") == 0) method = "SHOPEEPAY";
+            else if (strcmp(ew, "3") == 0) method = "GOPAY";
+            else if (strcmp(ew, "4") == 0) method = "OVO";
+            else { printf("[-] Pilihan tidak valid.\n"); continue; }
+
+            if (strcmp(method, "DANA") == 0 || strcmp(method, "OVO") == 0) {
+                printf("Masukkan nomor %s (contoh: 08123456789): ", method);
+                fflush(stdout);
+                if (!fgets(wallet, sizeof(wallet), stdin)) continue;
+                wallet[strcspn(wallet, "\n")] = 0;
+                clean_input_string(wallet);
+            }
+
+            int overwrite = price;
+            printf("Total amount is %d.\nEnter new amount if you need to overwrite.\nPress enter to ignore: ", price);
+            fflush(stdout);
+            char ow[32];
+            if (fgets(ow, sizeof(ow), stdin)) {
+                ow[strcspn(ow, "\n")] = 0;
+                if (strlen(ow) > 0) overwrite = atoi(ow);
+            }
+
+            cJSON* buy_res = execute_ewallet_purchase(B_API, API_KEY, XDATA_KEY, X_API_SEC,
+                    id_tok, acc_tok, opt_code, price, name, conf,
+                    wallet, method, p_for, overwrite, 0);
+            if (buy_res) {
+                printf("\nSTATUS TRANSAKSI:\n");
+                char* out = cJSON_Print(buy_res);
+                printf("%s\n", out);
+                free(out);
+                cJSON* data = cJSON_GetObjectItem(buy_res, "data");
+                if (data) {
+                    cJSON* deeplink = cJSON_GetObjectItem(data, "deeplink");
+                    if (deeplink && cJSON_IsString(deeplink))
+                        printf("\n[!] Lanjutkan pembayaran via link:\n%s\n", deeplink->valuestring);
+                    else if (strcmp(method, "OVO") == 0)
+                        printf("[!] Silakan buka aplikasi OVO untuk menyelesaikan pembayaran.\n");
+                }
+                cJSON_Delete(buy_res);
+            }
+        }
+        // ========== TAMBAHAN BARU: QRIS ==========
+        else if (strcmp(pay_choice, "5") == 0) {
+            int overwrite = price;
+            printf("Total amount is %d.\nEnter new amount if you need to overwrite.\nPress enter to ignore: ", price);
+            fflush(stdout);
+            char ow[32];
+            if (fgets(ow, sizeof(ow), stdin)) {
+                ow[strcspn(ow, "\n")] = 0;
+                if (strlen(ow) > 0) overwrite = atoi(ow);
+            }
+
+            char* trx_id = NULL;
+            cJSON* buy_res = execute_qris_purchase(B_API, API_KEY, XDATA_KEY, X_API_SEC,
+                    id_tok, acc_tok, opt_code, price, name, conf,
+                    p_for, overwrite, 0, &trx_id);
+            if (buy_res) {
+                printf("\nSTATUS TRANSAKSI:\n");
+                char* out = cJSON_Print(buy_res);
+                printf("%s\n", out);
+                free(out);
+                if (trx_id) {
+                    printf("[*] Mengambil kode QRIS...\n");
+                    cJSON* qr_res = get_qris_code(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok, trx_id);
+                    if (qr_res) {
+                        cJSON* data = cJSON_GetObjectItem(qr_res, "data");
+                        cJSON* qr = cJSON_GetObjectItem(data, "qr_code");
+                        if (qr && cJSON_IsString(qr)) {
+                            printf("\n=== QR Code ===\n");
+                            display_qr_terminal(qr->valuestring);
+                            printf("\nScan QR di atas dengan aplikasi e-wallet/QRIS.\n");
+                        }
+                        cJSON_Delete(qr_res);
+                    }
+                    free(trx_id);
+                }
+                cJSON_Delete(buy_res);
+            }
+        }
         
-        if (strcmp(pay_choice, "1")==0 || strcmp(pay_choice, "2")==0 || strcmp(pay_choice, "3")==0 || strcmp(pay_choice, "0")==0) {
+        if (strcmp(pay_choice, "1")==0 || strcmp(pay_choice, "2")==0 || strcmp(pay_choice, "3")==0 || strcmp(pay_choice, "4")==0 || strcmp(pay_choice, "5")==0 || strcmp(pay_choice, "0")==0) {
             printf("\nTekan Enter untuk melanjutkan..."); fflush(stdout);
             flush_stdin();
         }
@@ -602,7 +702,6 @@ int main() {
                             new_num[strcspn(new_num, "\n")] = 0; clean_input_string(new_num);
                             if (strcmp(new_num, "99") == 0 || strlen(new_num) == 0) continue;
                             
-                            // Validasi & normalisasi nomor
                             char* normalized = normalize_phone_number(new_num);
                             if (!normalized) {
                                 printf("\n[-] Nomor tidak valid. Harus 10-14 digit, diawali 0 atau 62.\n");

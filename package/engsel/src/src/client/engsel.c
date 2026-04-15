@@ -7,6 +7,7 @@
 #include "../include/client/http_client.h"
 #include "../include/service/crypto_aes.h"
 #include "../include/service/crypto_helper.h"
+#include <qrencode.h>   // <--- TAMBAHAN UNTUK QR CODE
 
 #define TZ_OFFSET_SEC (7 * 3600)
 
@@ -336,4 +337,298 @@ cJSON* execute_balance_purchase(const char* base, const char* key, const char* x
     cJSON_Delete(set_p);
     cJSON_Delete(pm_res);
     return res;
+}
+
+// ===================================================================
+// TAMBAHAN FUNGSI BARU UNTUK E‑WALLET & QRIS
+// (Diletakkan di akhir file, setelah semua fungsi yang sudah ada)
+// ===================================================================
+
+// Helper base64 sederhana (hanya untuk fallback QR code)
+static char* base64_encode_simple(const unsigned char* data, size_t len) {
+    static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t out_len = 4 * ((len + 2) / 3);
+    char* out = malloc(out_len + 1);
+    if (!out) return NULL;
+    for (size_t i = 0, j = 0; i < len;) {
+        uint32_t a = i < len ? data[i++] : 0;
+        uint32_t b = i < len ? data[i++] : 0;
+        uint32_t c = i < len ? data[i++] : 0;
+        uint32_t triple = (a << 16) | (b << 8) | c;
+        out[j++] = table[(triple >> 18) & 0x3F];
+        out[j++] = table[(triple >> 12) & 0x3F];
+        out[j++] = (i > len + 1) ? '=' : table[(triple >> 6) & 0x3F];
+        out[j++] = (i > len) ? '=' : table[triple & 0x3F];
+    }
+    out[out_len] = '\0';
+    return out;
+}
+
+cJSON* execute_ewallet_purchase(
+    const char* base, const char* key, const char* xdata, const char* sec,
+    const char* id, const char* acc, const char* opt_code, int price,
+    const char* name, const char* conf, const char* wallet_number,
+    const char* payment_method, const char* payment_for,
+    int overwrite_amount, int token_confirmation_idx)
+{
+    // 1. Ambil payment methods
+    printf("[*] 1/3 Mengambil token pembayaran...\n");
+    cJSON* pm_p = cJSON_CreateObject();
+    cJSON_AddStringToObject(pm_p, "payment_type", "PURCHASE");
+    cJSON_AddBoolToObject(pm_p, "is_enterprise", 0);
+    cJSON_AddStringToObject(pm_p, "payment_target", opt_code);
+    cJSON_AddStringToObject(pm_p, "lang", "en");
+    cJSON_AddBoolToObject(pm_p, "is_referral", 0);
+    cJSON_AddStringToObject(pm_p, "token_confirmation", conf);
+
+    cJSON* pm_res = send_api_request(base, key, xdata, sec,
+                     "payments/api/v8/payment-methods-option",
+                     pm_p, id, "POST", NULL);
+    cJSON_Delete(pm_p);
+    if (!pm_res || !cJSON_GetObjectItem(pm_res, "status") ||
+        strcmp(cJSON_GetObjectItem(pm_res, "status")->valuestring, "SUCCESS") != 0)
+        return pm_res;
+
+    cJSON* data = cJSON_GetObjectItem(pm_res, "data");
+    cJSON* t_pay = cJSON_GetObjectItem(data, "token_payment");
+    cJSON* ts_node = cJSON_GetObjectItem(data, "timestamp");
+    const char* token_payment = t_pay->valuestring;
+    long ts_to_sign = (long)ts_node->valuedouble;
+
+    // 2. Buat payload settlement e-wallet
+    printf("[*] 2/3 Membuat transaksi E-Wallet (%s)...\n", payment_method);
+    cJSON* set_p = cJSON_CreateObject();
+    cJSON* akrab = cJSON_AddObjectToObject(set_p, "akrab");
+    cJSON_AddItemToObject(akrab, "akrab_members", cJSON_CreateArray());
+    cJSON_AddStringToObject(akrab, "akrab_parent_alias", "");
+    cJSON_AddItemToObject(akrab, "members", cJSON_CreateArray());
+
+    cJSON_AddBoolToObject(set_p, "can_trigger_rating", 0);
+    cJSON_AddNumberToObject(set_p, "total_discount", 0);
+    cJSON_AddStringToObject(set_p, "coupon", "");
+    cJSON_AddStringToObject(set_p, "payment_for", payment_for);
+    cJSON_AddStringToObject(set_p, "topup_number", "");
+    cJSON_AddBoolToObject(set_p, "is_enterprise", 0);
+    cJSON* autobuy = cJSON_AddObjectToObject(set_p, "autobuy");
+    cJSON_AddBoolToObject(autobuy, "is_using_autobuy", 0);
+    cJSON_AddStringToObject(autobuy, "activated_autobuy_code", "");
+    cJSON* th = cJSON_AddObjectToObject(autobuy, "autobuy_threshold_setting");
+    cJSON_AddStringToObject(th, "label", "");
+    cJSON_AddStringToObject(th, "type", "");
+    cJSON_AddNumberToObject(th, "value", 0);
+
+    cJSON_AddStringToObject(set_p, "cc_payment_type", "");
+    cJSON_AddStringToObject(set_p, "access_token", acc);
+    cJSON_AddBoolToObject(set_p, "is_myxl_wallet", 0);
+    cJSON_AddStringToObject(set_p, "wallet_number", wallet_number ? wallet_number : "");
+    cJSON_AddItemToObject(set_p, "additional_data", cJSON_CreateObject());
+    cJSON_AddNumberToObject(set_p, "total_amount", overwrite_amount);
+    cJSON_AddNumberToObject(set_p, "total_fee", 0);
+    cJSON_AddBoolToObject(set_p, "is_use_point", 0);
+    cJSON_AddStringToObject(set_p, "lang", "en");
+
+    cJSON* items = cJSON_AddArrayToObject(set_p, "items");
+    cJSON* item = cJSON_CreateObject();
+    cJSON_AddStringToObject(item, "item_code", opt_code);
+    cJSON_AddStringToObject(item, "product_type", "");
+    cJSON_AddNumberToObject(item, "item_price", price);
+    cJSON_AddStringToObject(item, "item_name", name);
+    cJSON_AddNumberToObject(item, "tax", 0);
+    cJSON_AddStringToObject(item, "token_confirmation", conf);
+    cJSON_AddItemToArray(items, item);
+
+    cJSON_AddStringToObject(set_p, "verification_token", token_payment);
+    cJSON_AddStringToObject(set_p, "payment_method", payment_method);
+    cJSON_AddNumberToObject(set_p, "timestamp", (double)time(NULL));
+
+    // 3. Signature khusus e-wallet
+    char payment_targets[512];
+    snprintf(payment_targets, sizeof(payment_targets), "%s", opt_code);
+    char* custom_sig = make_x_signature_payment(sec, acc, ts_to_sign,
+                        payment_targets, token_payment, payment_method,
+                        payment_for, "payments/api/v8/settlement-multipayment/ewallet");
+
+    printf("[*] 3/3 Mengirim settlement...\n");
+    cJSON* result = send_api_request(base, key, xdata, sec,
+                    "payments/api/v8/settlement-multipayment/ewallet",
+                    set_p, id, "POST", custom_sig);
+
+    free(custom_sig);
+    cJSON_Delete(set_p);
+    cJSON_Delete(pm_res);
+    return result;
+}
+
+cJSON* execute_qris_purchase(
+    const char* base, const char* key, const char* xdata, const char* sec,
+    const char* id, const char* acc, const char* opt_code, int price,
+    const char* name, const char* conf, const char* payment_for,
+    int overwrite_amount, int token_confirmation_idx, char** out_transaction_id)
+{
+    *out_transaction_id = NULL;
+
+    // 1. Payment methods
+    printf("[*] 1/3 Mengambil token pembayaran...\n");
+    cJSON* pm_p = cJSON_CreateObject();
+    cJSON_AddStringToObject(pm_p, "payment_type", "PURCHASE");
+    cJSON_AddBoolToObject(pm_p, "is_enterprise", 0);
+    cJSON_AddStringToObject(pm_p, "payment_target", opt_code);
+    cJSON_AddStringToObject(pm_p, "lang", "en");
+    cJSON_AddBoolToObject(pm_p, "is_referral", 0);
+    cJSON_AddStringToObject(pm_p, "token_confirmation", conf);
+
+    cJSON* pm_res = send_api_request(base, key, xdata, sec,
+                     "payments/api/v8/payment-methods-option",
+                     pm_p, id, "POST", NULL);
+    cJSON_Delete(pm_p);
+    if (!pm_res || !cJSON_GetObjectItem(pm_res, "status") ||
+        strcmp(cJSON_GetObjectItem(pm_res, "status")->valuestring, "SUCCESS") != 0)
+        return pm_res;
+
+    cJSON* data = cJSON_GetObjectItem(pm_res, "data");
+    const char* token_payment = cJSON_GetObjectItem(data, "token_payment")->valuestring;
+    long ts_to_sign = (long)cJSON_GetObjectItem(data, "timestamp")->valuedouble;
+
+    // 2. Payload QRIS
+    printf("[*] 2/3 Membuat transaksi QRIS...\n");
+    cJSON* set_p = cJSON_CreateObject();
+    cJSON* akrab = cJSON_AddObjectToObject(set_p, "akrab");
+    cJSON_AddItemToObject(akrab, "akrab_members", cJSON_CreateArray());
+    cJSON_AddStringToObject(akrab, "akrab_parent_alias", "");
+    cJSON_AddItemToObject(akrab, "members", cJSON_CreateArray());
+
+    cJSON_AddBoolToObject(set_p, "can_trigger_rating", 0);
+    cJSON_AddNumberToObject(set_p, "total_discount", 0);
+    cJSON_AddStringToObject(set_p, "coupon", "");
+    cJSON_AddStringToObject(set_p, "payment_for", payment_for);
+    cJSON_AddStringToObject(set_p, "topup_number", "");
+    cJSON_AddStringToObject(set_p, "stage_token", "");
+    cJSON_AddBoolToObject(set_p, "is_enterprise", 0);
+    cJSON* autobuy = cJSON_AddObjectToObject(set_p, "autobuy");
+    cJSON_AddBoolToObject(autobuy, "is_using_autobuy", 0);
+    cJSON_AddStringToObject(autobuy, "activated_autobuy_code", "");
+    cJSON* th = cJSON_AddObjectToObject(autobuy, "autobuy_threshold_setting");
+    cJSON_AddStringToObject(th, "label", "");
+    cJSON_AddStringToObject(th, "type", "");
+    cJSON_AddNumberToObject(th, "value", 0);
+
+    cJSON_AddStringToObject(set_p, "access_token", acc);
+    cJSON_AddBoolToObject(set_p, "is_myxl_wallet", 0);
+    cJSON* add_data = cJSON_AddObjectToObject(set_p, "additional_data");
+    cJSON_AddNumberToObject(add_data, "original_price", price);
+    cJSON_AddBoolToObject(add_data, "is_spend_limit_temporary", 0);
+    cJSON_AddStringToObject(add_data, "migration_type", "");
+    cJSON_AddNumberToObject(add_data, "spend_limit_amount", 0);
+    cJSON_AddBoolToObject(add_data, "is_spend_limit", 0);
+    cJSON_AddNumberToObject(add_data, "tax", 0);
+    cJSON_AddStringToObject(add_data, "benefit_type", "");
+    cJSON_AddNumberToObject(add_data, "quota_bonus", 0);
+    cJSON_AddStringToObject(add_data, "cashtag", "");
+    cJSON_AddBoolToObject(add_data, "is_family_plan", 0);
+    cJSON_AddItemToObject(add_data, "combo_details", cJSON_CreateArray());
+    cJSON_AddBoolToObject(add_data, "is_switch_plan", 0);
+    cJSON_AddNumberToObject(add_data, "discount_recurring", 0);
+    cJSON_AddBoolToObject(add_data, "has_bonus", 0);
+    cJSON_AddNumberToObject(add_data, "discount_promo", 0);
+
+    cJSON_AddNumberToObject(set_p, "total_amount", overwrite_amount);
+    cJSON_AddNumberToObject(set_p, "total_fee", 0);
+    cJSON_AddBoolToObject(set_p, "is_use_point", 0);
+    cJSON_AddStringToObject(set_p, "lang", "en");
+
+    cJSON* items = cJSON_AddArrayToObject(set_p, "items");
+    cJSON* item = cJSON_CreateObject();
+    cJSON_AddStringToObject(item, "item_code", opt_code);
+    cJSON_AddStringToObject(item, "product_type", "");
+    cJSON_AddNumberToObject(item, "item_price", price);
+    cJSON_AddStringToObject(item, "item_name", name);
+    cJSON_AddNumberToObject(item, "tax", 0);
+    cJSON_AddStringToObject(item, "token_confirmation", conf);
+    cJSON_AddItemToArray(items, item);
+
+    cJSON_AddStringToObject(set_p, "verification_token", token_payment);
+    cJSON_AddStringToObject(set_p, "payment_method", "QRIS");
+    cJSON_AddNumberToObject(set_p, "timestamp", (double)time(NULL));
+
+    // Signature QRIS
+    char payment_targets[512];
+    snprintf(payment_targets, sizeof(payment_targets), "%s", opt_code);
+    char* custom_sig = make_x_signature_payment(sec, acc, ts_to_sign,
+                        payment_targets, token_payment, "QRIS",
+                        payment_for, "payments/api/v8/settlement-multipayment/qris");
+
+    printf("[*] 3/3 Mengirim settlement...\n");
+    cJSON* result = send_api_request(base, key, xdata, sec,
+                    "payments/api/v8/settlement-multipayment/qris",
+                    set_p, id, "POST", custom_sig);
+
+    free(custom_sig);
+    cJSON_Delete(set_p);
+    cJSON_Delete(pm_res);
+
+    if (result) {
+        cJSON* status = cJSON_GetObjectItem(result, "status");
+        if (status && cJSON_IsString(status) && strcmp(status->valuestring, "SUCCESS") == 0) {
+            cJSON* data_res = cJSON_GetObjectItem(result, "data");
+            if (data_res) {
+                cJSON* trx = cJSON_GetObjectItem(data_res, "transaction_code");
+                if (trx && cJSON_IsString(trx)) {
+                    *out_transaction_id = strdup(trx->valuestring);
+                }
+            }
+        }
+    }
+    return result;
+}
+
+cJSON* get_qris_code(const char* base, const char* key, const char* xdata,
+                     const char* sec, const char* id, const char* transaction_id) {
+    cJSON* p = cJSON_CreateObject();
+    cJSON_AddStringToObject(p, "transaction_id", transaction_id);
+    cJSON_AddBoolToObject(p, "is_enterprise", 0);
+    cJSON_AddStringToObject(p, "lang", "en");
+    cJSON_AddStringToObject(p, "status", "");
+
+    cJSON* res = send_api_request(base, key, xdata, sec,
+                  "payments/api/v8/pending-detail",
+                  p, id, "POST", NULL);
+    cJSON_Delete(p);
+    return res;
+}
+
+void display_qr_terminal(const char* qris_string) {
+#ifdef NO_QRENCODE
+    char* b64 = base64_encode_simple((const unsigned char*)qris_string, strlen(qris_string));
+    if (b64) {
+        printf("\n[!] QR Code tidak dapat ditampilkan (libqrencode tidak tersedia).\n");
+        printf("    Buka link ini untuk melihat QRIS:\n");
+        printf("    https://ki-ar-kod.netlify.app/?data=%s\n", b64);
+        free(b64);
+    }
+#else
+    QRcode *qr = QRcode_encodeString(qris_string, 0, QR_ECLEVEL_L, QR_MODE_8, 1);
+    if (!qr) {
+        printf("[-] Gagal membuat QR Code.\n");
+        return;
+    }
+
+    for (int x = 0; x < qr->width + 2; x++) printf("█");
+    printf("\n");
+
+    for (int y = 0; y < qr->width; y++) {
+        printf("█");
+        for (int x = 0; x < qr->width; x++) {
+            if (qr->data[y * qr->width + x] & 0x01)
+                printf("██");
+            else
+                printf("  ");
+        }
+        printf("█\n");
+    }
+
+    for (int x = 0; x < qr->width + 2; x++) printf("█");
+    printf("\n");
+
+    QRcode_free(qr);
+#endif
 }
