@@ -832,7 +832,7 @@ int main() {
                                     continue;
                                 } else {
                                     printf("\n[*] Verifikasi OTP...\n");
-                                    cJSON* login_res = submit_otp(B_CIAM, B_AUTH, UA, AX_KEY ? AX_KEY : "dummy", "SMS, normalized, otp_code);
+                                    cJSON* login_res = submit_otp(B_CIAM, B_AUTH, UA, AX_KEY ? AX_KEY : "dummy", "SMS", normalized, otp_code);
                                     if (login_res && cJSON_GetObjectItem(login_res, "refresh_token")) {
                                         cJSON* rt_node = cJSON_GetObjectItem(login_res, "refresh_token"); const char* rt = (rt_node && cJSON_IsString(rt_node)) ? rt_node->valuestring : "";
                                         cJSON* acc_node = cJSON_GetObjectItem(login_res, "access_token"); const char* acc = (acc_node && cJSON_IsString(acc_node)) ? acc_node->valuestring : "";
