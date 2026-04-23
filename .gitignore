@@ -1,0 +1,12 @@
+*.o
+*.a
+*.so
+*.ipk
+bin/
+build_dir/
+staging_dir/
+tmp/
+logs/
+.DS_Store
+package/engsel/src/engsel
+package/engsel/src/src/**/*.o
