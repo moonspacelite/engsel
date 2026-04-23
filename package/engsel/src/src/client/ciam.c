@@ -6,8 +6,11 @@
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
 #include <openssl/md5.h>
+#include <openssl/rand.h>
 #include "../include/client/ciam.h"
 #include "../include/client/http_client.h"
+#include "../include/service/crypto_helper.h"
+#include "../include/util/json_util.h"
 
 #define TZ_OFFSET_SEC (7 * 3600)
 
@@ -16,11 +19,12 @@ static const char* DUMMY_MSISDN = "6281398370564";
 static const char* DUMMY_IP      = "192.169.69.69";
 
 static int get_random_bytes(unsigned char *buf, size_t len) {
+    if (RAND_bytes(buf, (int)len) == 1) return 0;
     FILE *f = fopen("/dev/urandom", "rb");
     if (!f) return -1;
-    size_t read = fread(buf, 1, len, f);
+    size_t n = fread(buf, 1, len, f);
     fclose(f);
-    return (read == len) ? 0 : -1;
+    return (n == len) ? 0 : -1;
 }
 
 static void generate_uuid_v4(char *out) {
@@ -77,8 +81,13 @@ static char* generate_ax_fingerprint(void) {
     const char* key_str = getenv("AX_FP_KEY");
     if (!key_str) return strdup("dummy");
 
-    int rand1 = (random() % 9000) + 1000;
-    int rand2 = (random() % 9000) + 1000;
+    unsigned int r[2];
+    if (get_random_bytes((unsigned char*)r, sizeof(r)) != 0) {
+        r[0] = (unsigned int)time(NULL);
+        r[1] = (unsigned int)(time(NULL) ^ 0x5A5A5A5A);
+    }
+    int rand1 = (int)(r[0] % 9000) + 1000;
+    int rand2 = (int)(r[1] % 9000) + 1000;
 
     char plain[512];
     snprintf(plain, sizeof(plain),
@@ -122,28 +131,8 @@ static char* generate_ax_device_id(void) {
 static char* generate_ax_api_signature(const char* ts_for_sign, const char* contact,
                                        const char* code, const char* contact_type, const char* key_str) {
     if (!key_str) return strdup("dummy");
-
-    char preimage[1024];
-    snprintf(preimage, sizeof(preimage), "%spassword%s%s%sopenid",
-             ts_for_sign, contact_type, contact, code);
-
-    unsigned char hmac[32]; unsigned int len = 32;
-    HMAC(EVP_sha256(), (unsigned char*)key_str, strlen(key_str),
-         (unsigned char*)preimage, strlen(preimage), hmac, &len);
-
-    char* b64 = malloc(64); int b64_len = 0;
-    const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    for (int i = 0; i < 32; i += 3) {
-        unsigned char a = hmac[i];
-        unsigned char b = (i+1 < 32) ? hmac[i+1] : 0;
-        unsigned char c = (i+2 < 32) ? hmac[i+2] : 0;
-        b64[b64_len++] = table[(a >> 2) & 0x3F];
-        b64[b64_len++] = table[((a & 3) << 4) | ((b >> 4) & 0xF)];
-        b64[b64_len++] = (i+1 < 32) ? table[((b & 0xF) << 2) | ((c >> 6) & 0x3)] : '=';
-        b64[b64_len++] = (i+2 < 32) ? table[(c & 0x3F)] : '=';
-    }
-    b64[b64_len] = '\0';
-    return b64;
+    char *sig = make_ax_api_signature(key_str, ts_for_sign, contact, code, contact_type);
+    return sig ? sig : strdup("dummy");
 }
 
 static char* extend_session(const char* base_ciam_url, const char* basic_auth, const char* ua, const char* subscriber_id) {

@@ -8,6 +8,8 @@
 #include "../include/client/http_client.h"
 #include "../include/service/crypto_aes.h"
 #include "../include/service/crypto_helper.h"
+#include "../include/util/json_util.h"
+#include <openssl/rand.h>
 
 #ifndef NO_QRENCODE
 #include <qrencode.h>
@@ -16,11 +18,12 @@
 #define TZ_OFFSET_SEC (7 * 3600)
 
 static int get_random_bytes(unsigned char *buf, size_t len) {
+    if (RAND_bytes(buf, (int)len) == 1) return 0;
     FILE *f = fopen("/dev/urandom", "rb");
     if (!f) return -1;
-    size_t read = fread(buf, 1, len, f);
+    size_t n = fread(buf, 1, len, f);
     fclose(f);
-    return (read == len) ? 0 : -1;
+    return (n == len) ? 0 : -1;
 }
 
 static void generate_uuid(char *out) {
@@ -272,19 +275,15 @@ cJSON* execute_balance_purchase(const char* base, const char* key, const char* x
                                      pm_p, id, "POST", NULL);
     cJSON_Delete(pm_p);
 
-    if (!pm_res || !cJSON_GetObjectItem(pm_res, "status") ||
-        strcmp(cJSON_GetObjectItem(pm_res, "status")->valuestring, "SUCCESS") != 0)
-        return pm_res;
+    if (!json_status_is_success(pm_res)) return pm_res;
 
-    cJSON* pm_data = cJSON_GetObjectItem(pm_res, "data");
-    cJSON* t_pay_node = cJSON_GetObjectItem(pm_data, "token_payment");
-    cJSON* ts_node = cJSON_GetObjectItem(pm_data, "timestamp");
-    if (!t_pay_node || !cJSON_IsString(t_pay_node) || !ts_node) {
+    cJSON* pm_data = cJSON_GetObjectItemCaseSensitive(pm_res, "data");
+    const char* t_pay = json_get_str(pm_data, "token_payment", NULL);
+    long ts_sign = (long)json_get_double(pm_data, "timestamp", 0);
+    if (!t_pay || ts_sign == 0) {
         printf("[-] Fatal Error: Key token_payment/timestamp tidak ditemukan dari server.\n");
         return pm_res;
     }
-    const char* t_pay = t_pay_node->valuestring;
-    long ts_sign = (long)ts_node->valuedouble;
 
     printf("[*] 2/2 Mengeksekusi transaksi...\n");
     char payment_targets[1024];
@@ -299,38 +298,68 @@ cJSON* execute_balance_purchase(const char* base, const char* key, const char* x
                                            "BALANCE", pay_for,
                                            "payments/api/v8/settlement-multipayment");
 
+    /* Payload SUPERSET field-by-field sesuai Python purchase/balance.py. */
     cJSON* set_p = cJSON_CreateObject();
     cJSON_AddNumberToObject(set_p, "total_discount", 0);
     cJSON_AddBoolToObject(set_p, "is_enterprise", 0);
     cJSON_AddStringToObject(set_p, "payment_token", "");
     cJSON_AddStringToObject(set_p, "token_payment", t_pay);
-    cJSON_AddStringToObject(set_p, "payment_method", "BALANCE");
-    cJSON_AddNumberToObject(set_p, "timestamp", ts_sign);
+    cJSON_AddStringToObject(set_p, "activated_autobuy_code", "");
+    cJSON_AddStringToObject(set_p, "cc_payment_type", "");
+    cJSON_AddBoolToObject(set_p, "is_myxl_wallet", 0);
+    cJSON_AddStringToObject(set_p, "pin", "");
+    cJSON_AddStringToObject(set_p, "ewallet_promo_id", "");
+    cJSON_AddItemToObject(set_p, "members", cJSON_CreateArray());
+    cJSON_AddNumberToObject(set_p, "total_fee", 0);
+    cJSON_AddStringToObject(set_p, "fingerprint", "");
+    cJSON* th = cJSON_AddObjectToObject(set_p, "autobuy_threshold_setting");
+    cJSON_AddStringToObject(th, "label", "");
+    cJSON_AddStringToObject(th, "type", "");
+    cJSON_AddNumberToObject(th, "value", 0);
+    cJSON_AddBoolToObject(set_p, "is_use_point", 0);
     cJSON_AddStringToObject(set_p, "lang", "en");
+    cJSON_AddStringToObject(set_p, "payment_method", "BALANCE");
+    cJSON_AddNumberToObject(set_p, "timestamp", (double)ts_sign);
+    cJSON_AddNumberToObject(set_p, "points_gained", 0);
+    cJSON_AddBoolToObject(set_p, "can_trigger_rating", 0);
+    cJSON_AddItemToObject(set_p, "akrab_members", cJSON_CreateArray());
+    cJSON_AddStringToObject(set_p, "akrab_parent_alias", "");
+    cJSON_AddStringToObject(set_p, "referral_unique_code", "");
+    cJSON_AddStringToObject(set_p, "coupon", "");
     cJSON_AddStringToObject(set_p, "payment_for", pay_for);
-    cJSON_AddStringToObject(set_p, "encrypted_payment_token", enc_tok);
+    cJSON_AddBoolToObject(set_p, "with_upsell", 0);
+    cJSON_AddStringToObject(set_p, "topup_number", "");
+    cJSON_AddStringToObject(set_p, "stage_token", "");
+    cJSON_AddStringToObject(set_p, "authentication_id", "");
+    cJSON_AddStringToObject(set_p, "encrypted_payment_token", enc_tok ? enc_tok : "");
+    cJSON_AddStringToObject(set_p, "token", "");
+    cJSON_AddStringToObject(set_p, "token_confirmation", "");
     cJSON_AddStringToObject(set_p, "access_token", acc);
-    cJSON_AddStringToObject(set_p, "encrypted_authentication_id", enc_auth);
-    cJSON_AddNumberToObject(set_p, "total_amount", overwrite_amount);
+    cJSON_AddStringToObject(set_p, "wallet_number", "");
+    cJSON_AddStringToObject(set_p, "encrypted_authentication_id", enc_auth ? enc_auth : "");
 
     cJSON* add_data = cJSON_AddObjectToObject(set_p, "additional_data");
     cJSON_AddNumberToObject(add_data, "original_price", price);
-    cJSON_AddNumberToObject(add_data, "tax", 0);
-    // Tambahan field yang ada di Python
-    cJSON_AddStringToObject(add_data, "balance_type", "PREPAID_BALANCE");
-    cJSON_AddBoolToObject(add_data, "is_spend_limit", 0);
     cJSON_AddBoolToObject(add_data, "is_spend_limit_temporary", 0);
-    cJSON_AddNumberToObject(add_data, "spend_limit_amount", 0);
     cJSON_AddStringToObject(add_data, "migration_type", "");
+    cJSON_AddStringToObject(add_data, "akrab_m2m_group_id", "false");
+    cJSON_AddNumberToObject(add_data, "spend_limit_amount", 0);
+    cJSON_AddBoolToObject(add_data, "is_spend_limit", 0);
     cJSON_AddStringToObject(add_data, "mission_id", "");
+    cJSON_AddNumberToObject(add_data, "tax", 0);
     cJSON_AddNumberToObject(add_data, "quota_bonus", 0);
     cJSON_AddStringToObject(add_data, "cashtag", "");
     cJSON_AddBoolToObject(add_data, "is_family_plan", 0);
-    cJSON* combo_arr = cJSON_AddArrayToObject(add_data, "combo_details");
+    cJSON_AddItemToObject(add_data, "combo_details", cJSON_CreateArray());
     cJSON_AddBoolToObject(add_data, "is_switch_plan", 0);
     cJSON_AddNumberToObject(add_data, "discount_recurring", 0);
+    cJSON_AddBoolToObject(add_data, "is_akrab_m2m", 0);
+    cJSON_AddStringToObject(add_data, "balance_type", "PREPAID_BALANCE");
     cJSON_AddBoolToObject(add_data, "has_bonus", 0);
     cJSON_AddNumberToObject(add_data, "discount_promo", 0);
+
+    cJSON_AddNumberToObject(set_p, "total_amount", overwrite_amount);
+    cJSON_AddBoolToObject(set_p, "is_using_autobuy", 0);
 
     cJSON* items_arr = cJSON_AddArrayToObject(set_p, "items");
     cJSON* item1 = cJSON_CreateObject();
