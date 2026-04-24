@@ -1044,14 +1044,26 @@ static void cli_list_account(void) {
     if (!arr || !cJSON_IsArray(arr)) { printf("(format refresh-tokens.json rusak)\n"); cJSON_Delete(arr); return; }
     int n = cJSON_GetArraySize(arr);
     if (n == 0) { printf("(belum ada akun tersimpan)\n"); cJSON_Delete(arr); return; }
+
+    /* Cari nomor aktif dari /etc/engsel/active.number (ditulis oleh menu Login). */
+    double active_num = -1.0;
+    FILE* af = fopen("/etc/engsel/active.number", "r");
+    if (af) { char b[32]; if (fgets(b, sizeof(b), af)) active_num = atof(b); fclose(af); }
+
     printf("No. Nomor          Type         Status\n");
     for (int i = 0; i < n; i++) {
         cJSON* a = cJSON_GetArrayItem(arr, i);
-        const char* num  = json_get_str(a, "number", "?");
-        const char* type = json_get_str(a, "type", "");
-        cJSON* active    = cJSON_GetObjectItem(a, "active");
-        int is_active    = active && cJSON_IsTrue(active);
-        printf("%2d. %-14s %-12s %s\n", i + 1, num, type[0]?type:"-",
+        /* "number" disimpan sebagai cJSON number (lihat main.c di sekitar baris
+         * 1235 dan 1386): baca via cJSON_GetObjectItem + format manual. */
+        cJSON* num_item = cJSON_GetObjectItem(a, "number");
+        char num_buf[32] = "?";
+        if (num_item && cJSON_IsNumber(num_item))
+            snprintf(num_buf, sizeof(num_buf), "%.0f", num_item->valuedouble);
+        /* Tipe kartu disimpan dengan key "subscription_type". */
+        const char* type = json_get_str(a, "subscription_type", "");
+        int is_active = (num_item && cJSON_IsNumber(num_item) &&
+                         active_num >= 0 && num_item->valuedouble == active_num);
+        printf("%2d. %-14s %-12s %s\n", i + 1, num_buf, type[0] ? type : "-",
                is_active ? "(active)" : "");
     }
     cJSON_Delete(arr);
@@ -1075,8 +1087,14 @@ static void cli_list_json_array_field(const char* path, const char* label,
         cJSON* e = cJSON_GetArrayItem(iter, i);
         printf("%2d.", i + 1);
         for (int f = 0; f < nfields; f++) {
-            const char* v = json_get_str(e, fields[f], "");
-            if (v && v[0]) printf(" %s=%s", fields[f], v);
+            cJSON* v = cJSON_GetObjectItem(e, fields[f]);
+            if (!v) continue;
+            if (cJSON_IsString(v) && v->valuestring && v->valuestring[0])
+                printf(" %s=%s", fields[f], v->valuestring);
+            else if (cJSON_IsNumber(v))
+                printf(" %s=%.0f", fields[f], v->valuedouble);
+            else if (cJSON_IsBool(v))
+                printf(" %s=%s", fields[f], cJSON_IsTrue(v) ? "true" : "false");
         }
         printf("\n");
     }
