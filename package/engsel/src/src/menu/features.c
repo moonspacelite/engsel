@@ -1139,6 +1139,153 @@ static void custom_decoy_menu(const char* base_api, const char* api_key,
 }
 
 /* ---------------------------------------------------------------------------
+ * Custom Paket HOT
+ *
+ * File storage: /etc/engsel/hot_data/hot.json (dipakai juga oleh menu 3 HOT)
+ * Schema per entry:
+ *   { "family_name", "family_code", "is_enterprise", "variant_name",
+ *     "option_name", "order" }
+ * ------------------------------------------------------------------------- */
+
+static const char* HOT_JSON_PATH = "/etc/engsel/hot_data/hot.json";
+
+static cJSON* ch_load(void) {
+    size_t sz = 0;
+    char* raw = file_read_all(HOT_JSON_PATH, &sz);
+    if (!raw || sz == 0) { free(raw); return cJSON_CreateArray(); }
+    cJSON* arr = cJSON_Parse(raw); free(raw);
+    if (!arr || !cJSON_IsArray(arr)) {
+        cJSON_Delete(arr); return cJSON_CreateArray();
+    }
+    return arr;
+}
+
+static int ch_save(cJSON* arr) {
+    char* out = cJSON_Print(arr);
+    if (!out) return -1;
+    int rc = file_write_atomic(HOT_JSON_PATH, out);
+    free(out);
+    return rc;
+}
+
+static void ch_add(const char* base_api, const char* api_key,
+                   const char* xdata_key, const char* x_api_secret,
+                   const char* id_token) {
+    char code[256]; read_line("Family Code (99=batal): ", code, sizeof(code));
+    if (strcmp(code, "99") == 0 || strlen(code) == 0) return;
+
+    printf("[*] Fetching family dari XL Store...\n");
+    int ent = 0; char mig[64] = "NONE";
+    cJSON* fam = cd_fetch_family(base_api, api_key, xdata_key, x_api_secret,
+                                 id_token, code, &ent, mig, sizeof(mig));
+    if (!fam) { printf("[-] Family code tidak ditemukan.\n"); pause_enter(); return; }
+
+    cJSON* data = cJSON_GetObjectItem(fam, "data");
+    cJSON* pfam = cJSON_GetObjectItem(data, "package_family");
+    const char* fam_name = json_get_str(pfam, "name", "?");
+
+    typedef struct { const char* vn; int ord; const char* on; int price; } it_t;
+    it_t items[256]; int nitems = 0;
+    cJSON* variants = cJSON_GetObjectItem(data, "package_variants");
+    cJSON* v;
+    cJSON_ArrayForEach(v, variants) {
+        const char* vn = json_get_str(v, "name", "");
+        cJSON* opts = cJSON_GetObjectItem(v, "package_options");
+        cJSON* o;
+        cJSON_ArrayForEach(o, opts) {
+            if (nitems >= 256) break;
+            items[nitems].vn    = vn;
+            items[nitems].ord   = cJSON_GetObjectItem(o, "order") ? cJSON_GetObjectItem(o, "order")->valueint : 0;
+            items[nitems].on    = json_get_str(o, "name", "?");
+            items[nitems].price = cJSON_GetObjectItem(o, "price") ? cJSON_GetObjectItem(o, "price")->valueint : 0;
+            nitems++;
+        }
+    }
+    if (nitems == 0) { printf("[-] Family tidak punya opsi.\n"); cJSON_Delete(fam); pause_enter(); return; }
+
+    printf("\n-------------------------------------------------------\n");
+    printf(" %s\n", fam_name);
+    printf("-------------------------------------------------------\n");
+    for (int i = 0; i < nitems; i++) {
+        printf("%2d. %s - %s  (Rp %d)\n", i + 1, items[i].vn, items[i].on, items[i].price);
+    }
+    printf("-------------------------------------------------------\n");
+    char pick[16]; read_line("Pilih nomor opsi (99=batal): ", pick, sizeof(pick));
+    if (strcmp(pick, "99") == 0) { cJSON_Delete(fam); return; }
+    int idx = atoi(pick);
+    if (idx < 1 || idx > nitems) { printf("[-] Nomor di luar range.\n"); cJSON_Delete(fam); pause_enter(); return; }
+    it_t* sel = &items[idx - 1];
+
+    cJSON* arr = ch_load();
+    cJSON* entry = cJSON_CreateObject();
+    cJSON_AddStringToObject(entry, "family_name",   fam_name);
+    cJSON_AddStringToObject(entry, "family_code",   code);
+    cJSON_AddBoolToObject  (entry, "is_enterprise", ent);
+    cJSON_AddStringToObject(entry, "variant_name",  sel->vn);
+    cJSON_AddStringToObject(entry, "option_name",   sel->on);
+    cJSON_AddNumberToObject(entry, "order",         sel->ord);
+    cJSON_AddItemToArray(arr, entry);
+
+    if (ch_save(arr) == 0) printf("[+] Ditambahkan ke Paket HOT: %s - %s\n", sel->vn, sel->on);
+    else                   printf("[-] Gagal simpan ke %s\n", HOT_JSON_PATH);
+    cJSON_Delete(arr);
+    cJSON_Delete(fam);
+    pause_enter();
+}
+
+static void custom_hot_menu(const char* base_api, const char* api_key,
+                            const char* xdata_key, const char* x_api_secret,
+                            const char* id_token) {
+    while (1) {
+        printf("\n=======================================================\n");
+        printf("         CUSTOM PAKET HOT\n");
+        printf("=======================================================\n");
+
+        cJSON* arr = ch_load();
+        int n = cJSON_GetArraySize(arr);
+        if (n == 0) {
+            printf(" (belum ada paket HOT)\n");
+        } else {
+            for (int i = 0; i < n; i++) {
+                cJSON* e = cJSON_GetArrayItem(arr, i);
+                printf("%2d. %s - %s - %s\n", i + 1,
+                       json_get_str(e, "family_name", "?"),
+                       json_get_str(e, "variant_name", "?"),
+                       json_get_str(e, "option_name", "?"));
+            }
+        }
+        printf("-------------------------------------------------------\n");
+        printf("'a' tambah, 'd N' hapus, '00' kembali: ");
+        fflush(stdout);
+
+        char cmd[64]; if (!fgets(cmd, sizeof(cmd), stdin)) { cJSON_Delete(arr); return; }
+        cmd[strcspn(cmd, "\n")] = 0;
+
+        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(arr); return; }
+        else if (strcmp(cmd, "a") == 0 || strcmp(cmd, "A") == 0) {
+            cJSON_Delete(arr);
+            ch_add(base_api, api_key, xdata_key, x_api_secret, id_token);
+        }
+        else if (strncasecmp(cmd, "d ", 2) == 0) {
+            int v = atoi(cmd + 2);
+            if (v < 1 || v > n) { printf("[-] Nomor di luar range.\n"); cJSON_Delete(arr); pause_enter(); continue; }
+            cJSON* e = cJSON_GetArrayItem(arr, v - 1);
+            const char* nm = json_get_str(e, "option_name", "?");
+            printf("Hapus %s? (y/n): ", nm);
+            if (read_yn("")) {
+                cJSON_DeleteItemFromArray(arr, v - 1);
+                if (ch_save(arr) == 0) printf("[+] Dihapus.\n");
+                else                   printf("[-] Gagal simpan.\n");
+            }
+            cJSON_Delete(arr); pause_enter();
+        }
+        else {
+            cJSON_Delete(arr);
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------
  * Main dispatcher
  * ------------------------------------------------------------------------- */
 
@@ -1155,6 +1302,7 @@ void show_features_menu(const char* base_api, const char* api_key,
                "3. Transfer Pulsa\n"
                "4. Simpan Family Code\n"
                "5. Custom Decoy\n"
+               "6. Custom Paket HOT\n"
                "00. Kembali\n"
                "99. Menu utama\n"
                "Pilihan: ");
@@ -1174,5 +1322,7 @@ void show_features_menu(const char* base_api, const char* api_key,
             saved_family_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
         else if (strcmp(ch, "5") == 0)
             custom_decoy_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
+        else if (strcmp(ch, "6") == 0)
+            custom_hot_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
     }
 }
