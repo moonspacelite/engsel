@@ -61,6 +61,13 @@ extern void authenticate_and_fetch_balance(cJSON* tokens_arr, const char* B_CIAM
                                            const char* B_API, const char* B_AUTH,
                                            const char* UA, const char* API_KEY,
                                            const char* XDATA_KEY, const char* X_API_SEC);
+extern cJSON* do_family_bruteforce(const char* B_API, const char* API_KEY,
+                                   const char* XDATA_KEY, const char* X_API_SEC,
+                                   const char* id_tok, const char* f_code,
+                                   int is_ent_override, const char* mig_override);
+extern cJSON* fetch_decoy_package(const char* subs_type, const char* B_API,
+                                  const char* API_KEY, const char* XDATA_KEY,
+                                  const char* X_API_SEC, const char* id_tok);
 
 static const char* AB_CONFIG_PATH = "/etc/engsel/auto_buy.json";
 static const char* AB_PID_PATH    = "/var/run/engsel-autobuy.pid";
@@ -461,23 +468,76 @@ static int ab_trigger_purchase(const char* base_api, const char* api_key,
     cJSON* dec_det = NULL;
 
     if (strcmp(pm, "BALANCE_DECOY") == 0) {
+        const char* dec_src = json_get_str(entry, "decoy_source", "");
         cJSON* de = cJSON_GetObjectItem(entry, "decoy");
         const char* dec_oc = de ? json_get_str(de, "option_code", "") : "";
-        if (!dec_oc[0]) {
-            ab_log("[%s] decoy option_code kosong (saved custom decoy butuh resolve "
-                   "via bruteforce — skip auto trigger, pakai BALANCE saja)", nm);
-            pm = "BALANCE";
-        } else {
+
+        if (dec_oc[0]) {
+            /* custom_inline: option_code sudah lengkap -> fetch detail langsung */
             dec_det = get_package_detail(base_api, api_key, xdata_key, x_api_secret,
                                           id_token, dec_oc);
-            if (!dec_det) { ab_log("[%s] gagal fetch decoy detail", nm); cJSON_Delete(det); return -1; }
+        } else if (strcmp(dec_src, "default") == 0) {
+            /* default: pakai fetch_decoy_package yang sudah ada di main.c
+             * (pilih file decoy berdasarkan active_subs_type + resolve option). */
+            dec_det = fetch_decoy_package(active_subs_type, base_api, api_key,
+                                          xdata_key, x_api_secret, id_token);
+        } else if (strcmp(dec_src, "custom_saved") == 0 && de) {
+            /* custom_saved: resolve family+variant+order -> option_code -> detail */
+            const char* fc = json_get_str(de, "family_code", "");
+            const char* vc = json_get_str(de, "variant_code", "");
+            int ord = cJSON_GetObjectItem(de, "order") ? cJSON_GetObjectItem(de, "order")->valueint : 0;
+            int is_ent = cJSON_IsTrue(cJSON_GetObjectItem(de, "is_enterprise")) ? 1 : 0;
+            const char* mig = json_get_str(de, "migration_type", "NONE");
+            if (fc[0] && vc[0] && ord > 0) {
+                cJSON* fam = do_family_bruteforce(base_api, api_key, xdata_key, x_api_secret,
+                                                  id_token, fc, is_ent, mig);
+                if (fam) {
+                    char resolved[256] = {0};
+                    cJSON* fdata = cJSON_GetObjectItem(fam, "data");
+                    cJSON* variants = fdata ? cJSON_GetObjectItem(fdata, "package_variants") : NULL;
+                    cJSON* v;
+                    cJSON_ArrayForEach(v, variants) {
+                        const char* vcode = json_get_str(v, "package_variant_code", "");
+                        if (strcmp(vcode, vc) != 0) continue;
+                        cJSON* opts = cJSON_GetObjectItem(v, "package_options");
+                        cJSON* o;
+                        cJSON_ArrayForEach(o, opts) {
+                            cJSON* oord = cJSON_GetObjectItem(o, "order");
+                            if (oord && oord->valueint == ord) {
+                                snprintf(resolved, sizeof(resolved), "%s",
+                                         json_get_str(o, "package_option_code", ""));
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                    cJSON_Delete(fam);
+                    if (resolved[0]) {
+                        dec_det = get_package_detail(base_api, api_key, xdata_key, x_api_secret,
+                                                     id_token, resolved);
+                    }
+                }
+            }
+        }
+
+        if (!dec_det) {
+            ab_log("[%s] decoy gagal resolve (source=%s); fallback BALANCE saja", nm,
+                   dec_src[0] ? dec_src : "?");
+            pm = "BALANCE";
+        } else {
             cJSON* dd_data = cJSON_GetObjectItem(dec_det, "data");
             cJSON* dd_opt  = dd_data ? cJSON_GetObjectItem(dd_data, "package_option") : NULL;
-            if (!dd_opt) { ab_log("[%s] decoy detail malformed", nm); cJSON_Delete(dec_det); cJSON_Delete(det); return -1; }
-            dec_code  = dec_oc;
-            dec_price = cJSON_GetObjectItem(dd_opt, "price") ? cJSON_GetObjectItem(dd_opt, "price")->valueint : 0;
-            dec_name  = json_get_str(dd_opt, "name", "");
-            dec_conf  = json_get_str(dd_data, "token_confirmation", "");
+            if (!dd_opt) {
+                ab_log("[%s] decoy detail malformed; fallback BALANCE", nm);
+                cJSON_Delete(dec_det); dec_det = NULL;
+                pm = "BALANCE";
+            } else {
+                dec_code  = json_get_str(dd_opt, "package_option_code", "");
+                if (!dec_code[0]) dec_code = NULL;
+                dec_price = cJSON_GetObjectItem(dd_opt, "price") ? cJSON_GetObjectItem(dd_opt, "price")->valueint : 0;
+                dec_name  = json_get_str(dd_opt, "name", "");
+                dec_conf  = json_get_str(dd_data, "token_confirmation", "");
+            }
         }
     }
 
@@ -561,18 +621,51 @@ int auto_buy_worker_main(void) {
             continue;
         }
 
+        /* Per-entry next-check tracking, keyed by option_code supaya stabil
+         * meskipun config di-reload (indeks bisa berubah kalau user hapus). */
+        #define AB_MAX_TRACK 64
+        static char  track_key[AB_MAX_TRACK][256];
+        static time_t track_next[AB_MAX_TRACK];
+        static int   track_init = 0;
+        if (!track_init) {
+            for (int i = 0; i < AB_MAX_TRACK; i++) { track_key[i][0] = 0; track_next[i] = 0; }
+            track_init = 1;
+        }
+
         cJSON* arr = ab_load();
         int n = cJSON_GetArraySize(arr);
-        int min_sleep = 300;
+        time_t min_next = now + 300;
         for (int i = 0; i < n; i++) {
             cJSON* e = cJSON_GetArrayItem(arr, i);
             if (!cJSON_IsTrue(cJSON_GetObjectItem(e, "enabled"))) continue;
             int interval = cJSON_GetObjectItem(e, "interval_sec") ? cJSON_GetObjectItem(e, "interval_sec")->valueint : 300;
-            if (interval < min_sleep) min_sleep = interval;
+            if (interval < 30) interval = 30;
 
             const char* name = json_get_str(e, "name", "?");
             const char* fc   = json_get_str(e, "family_code", "");
+            const char* oc   = json_get_str(e, "option_code", "");
             int thr_mb = cJSON_GetObjectItem(e, "threshold_mb") ? cJSON_GetObjectItem(e, "threshold_mb")->valueint : 0;
+
+            /* Lookup/alloc slot untuk entry ini */
+            int slot = -1, empty = -1;
+            for (int t = 0; t < AB_MAX_TRACK; t++) {
+                if (track_key[t][0] && strcmp(track_key[t], oc) == 0) { slot = t; break; }
+                if (!track_key[t][0] && empty < 0) empty = t;
+            }
+            if (slot < 0 && empty >= 0) {
+                slot = empty;
+                snprintf(track_key[slot], sizeof(track_key[slot]), "%s", oc);
+                track_next[slot] = 0; /* cek pertama langsung */
+            }
+            if (slot < 0) {
+                ab_log("[%s] track slot full (>%d entries), skip", name, AB_MAX_TRACK);
+                continue;
+            }
+
+            if (now < track_next[slot]) {
+                if (track_next[slot] < min_next) min_next = track_next[slot];
+                continue;
+            }
 
             long long rem = ab_check_remaining(base_api, api_key, xdata_key, x_api_secret,
                                                id_tok, fc);
@@ -587,12 +680,18 @@ int auto_buy_worker_main(void) {
                     ab_write_state(name, iter, "triggered");
                 }
             }
+            track_next[slot] = now + interval;
+            if (track_next[slot] < min_next) min_next = track_next[slot];
         }
         cJSON_Delete(arr);
         ab_write_state(NULL, iter, "tick-done");
 
-        /* sleep min_sleep detik, tapi cek g_ab_stop tiap detik */
-        for (int s = 0; s < min_sleep && !g_ab_stop; s++) sleep(1);
+        /* sleep sampai entry paling awal jatuh tempo, minimal 1 detik, maks 300;
+         * cek g_ab_stop tiap detik supaya stop responsif. */
+        int sleep_sec = (int)(min_next - time(NULL));
+        if (sleep_sec < 1)   sleep_sec = 1;
+        if (sleep_sec > 300) sleep_sec = 300;
+        for (int s = 0; s < sleep_sec && !g_ab_stop; s++) sleep(1);
     }
     ab_log("worker stopped pid=%d", (int)getpid());
     unlink(AB_PID_PATH);
