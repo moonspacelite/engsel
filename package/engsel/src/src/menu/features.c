@@ -17,6 +17,7 @@
 #include "../include/util/json_util.h"
 #include "../include/util/file_util.h"
 #include "../include/util/phone.h"
+#include "../include/util/nav.h"
 
 /* Tipe kartu aktif global (didefinisikan di main.c). */
 extern char active_subs_type[32];
@@ -175,6 +176,10 @@ static void circle_info_menu(const char* base, const char* api_key,
                              const char* enc_field_key, const char* id_token,
                              const char* access_token, const char* my_msisdn) {
     while (1) {
+        fx_clear();
+        printf("=======================================================\n");
+        printf("         CIRCLE\n");
+        printf("=======================================================\n");
         cJSON* group_res = circle_get_group_data(base, api_key, xdata_key, sec, id_token);
         if (!json_status_is_success(group_res)) {
             printf("[-] Gagal ambil data circle.\n"); cJSON_Delete(group_res);
@@ -277,6 +282,7 @@ static void circle_info_menu(const char* base, const char* api_key,
                "acc <N>. Accept invitation member di posisi N\n"
                "2. Bonus List\n"
                "00. Kembali\n"
+               "99. Kembali ke menu utama\n"
                "Pilihan: ");
         fflush(stdout);
         char ch[64]; if (!fgets(ch, sizeof(ch), stdin)) { ch[0] = 0; }
@@ -285,6 +291,10 @@ static void circle_info_menu(const char* base, const char* api_key,
         if (strcmp(ch, "00") == 0) {
             cJSON_Delete(group_res); cJSON_Delete(members_res); cJSON_Delete(spend_res);
             return;
+        }
+        else if (strcmp(ch, "99") == 0) {
+            cJSON_Delete(group_res); cJSON_Delete(members_res); cJSON_Delete(spend_res);
+            nav_trigger_goto_main(); return;
         }
         else if (strcmp(ch, "1") == 0) {
             char inv_m[32], inv_n[64];
@@ -354,6 +364,10 @@ static void famplan_menu(const char* base, const char* api_key,
                          const char* xdata_key, const char* sec,
                          const char* id_token) {
     while (1) {
+        fx_clear();
+        printf("=======================================================\n");
+        printf("         FAMILY PLAN / AKRAB ORGANIZER\n");
+        printf("=======================================================\n");
         cJSON* res = famplan_get_member_info(base, api_key, xdata_key, sec, id_token);
         cJSON* data = res ? cJSON_GetObjectItemCaseSensitive(res, "data") : NULL;
         if (!data) {
@@ -414,12 +428,14 @@ static void famplan_menu(const char* base, const char* api_key,
                "limit <slot> <MB>. Set quota limit\n"
                "del <slot>. Remove member\n"
                "00. Kembali\n"
+               "99. Kembali ke menu utama\n"
                "Pilihan: ");
         fflush(stdout);
         char ch[64]; if (!fgets(ch, sizeof(ch), stdin)) { ch[0] = 0; }
         ch[strcspn(ch, "\n")] = 0;
 
         if (strcmp(ch, "00") == 0) { cJSON_Delete(res); return; }
+        else if (strcmp(ch, "99") == 0) { cJSON_Delete(res); nav_trigger_goto_main(); return; }
         else if (strcmp(ch, "1") == 0) {
             char sb[8], tm[32], pa[64], ca[64];
             read_line("Slot: ", sb, sizeof(sb));
@@ -649,7 +665,8 @@ static void transfer_pulsa_menu(const char* base_api,
     }
     const char* ua = getenv("UA");
 
-    printf("\n=======================================================\n");
+    fx_clear();
+    printf("=======================================================\n");
     printf("         TRANSFER PULSA (SHARE BALANCE)\n");
     printf("=======================================================\n");
     printf(" Pastikan PIN transaksi MyXL sudah di-set di app MyXL.\n");
@@ -897,6 +914,7 @@ static void saved_family_menu(const char* base_api, const char* api_key,
         printf("  add          Tambah family code baru\n");
         printf("  del <nomor>  Hapus entry\n");
         printf("  00           Kembali\n");
+        printf("  99           Kembali ke menu utama\n");
         printf("Pilihan: ");
         fflush(stdout);
 
@@ -904,7 +922,8 @@ static void saved_family_menu(const char* base_api, const char* api_key,
         cmd[strcspn(cmd, "\n")] = 0;
 
         int del_n;
-        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(arr); return; }
+        if (strcmp(cmd, "00") == 0) { cJSON_Delete(arr); return; }
+        else if (strcmp(cmd, "99") == 0) { cJSON_Delete(arr); nav_trigger_goto_main(); return; }
         else if (cmd_eq(cmd, "add", "a")) {
             cJSON_Delete(arr);
             sf_add_entry(base_api, api_key, xdata_key, x_api_secret, id_token);
@@ -921,7 +940,10 @@ static void saved_family_menu(const char* base_api, const char* api_key,
                 char fc[256];
                 snprintf(fc, sizeof(fc), "%s", json_get_str(item, "family_code", ""));
                 cJSON_Delete(arr);
-                if (fc[0]) purchase_flow_by_family_code(fc);
+                if (fc[0]) {
+                    purchase_flow_by_family_code(fc);
+                    if (nav_should_return()) return;
+                }
             } else {
                 cJSON_Delete(arr);
             }
@@ -1131,6 +1153,7 @@ static void custom_decoy_menu(const char* base_api, const char* api_key,
         printf("  use 0         Kembali ke decoy default bawaan\n");
         printf("  del <nomor>   Hapus entry\n");
         printf("  00            Kembali\n");
+        printf("  99            Kembali ke menu utama\n");
         printf("Pilihan: ");
         fflush(stdout);
 
@@ -1138,7 +1161,8 @@ static void custom_decoy_menu(const char* base_api, const char* api_key,
         cmd[strcspn(cmd, "\n")] = 0;
 
         int del_n;
-        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(cfg); return; }
+        if (strcmp(cmd, "00") == 0) { cJSON_Delete(cfg); return; }
+        else if (strcmp(cmd, "99") == 0) { cJSON_Delete(cfg); nav_trigger_goto_main(); return; }
         else if (cmd_eq(cmd, "add", "a")) {
             cJSON_Delete(cfg);
             cd_add(base_api, api_key, xdata_key, x_api_secret, id_token);
@@ -1324,6 +1348,7 @@ static void custom_hot_menu(const char* base_api, const char* api_key,
         printf("  del <nomor>  Hapus entry\n");
         printf("  reset        Kembalikan ke paket HOT bawaan\n");
         printf("  00           Kembali\n");
+        printf("  99           Kembali ke menu utama\n");
         printf("Pilihan: ");
         fflush(stdout);
 
@@ -1331,7 +1356,8 @@ static void custom_hot_menu(const char* base_api, const char* api_key,
         cmd[strcspn(cmd, "\n")] = 0;
 
         int del_n;
-        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(arr); return; }
+        if (strcmp(cmd, "00") == 0) { cJSON_Delete(arr); return; }
+        else if (strcmp(cmd, "99") == 0) { cJSON_Delete(arr); nav_trigger_goto_main(); return; }
         else if (cmd_eq(cmd, "add", "a")) {
             cJSON_Delete(arr);
             ch_add(base_api, api_key, xdata_key, x_api_secret, id_token);
@@ -1398,7 +1424,8 @@ void show_features_menu(const char* base_api, const char* api_key,
         fflush(stdout);
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) return;
         ch[strcspn(ch, "\n")] = 0;
-        if (strcmp(ch, "00") == 0 || strcmp(ch, "99") == 0) return;
+        if (strcmp(ch, "00") == 0) return;
+        else if (strcmp(ch, "99") == 0) { nav_trigger_goto_main(); return; }
         else if (strcmp(ch, "1") == 0)
             circle_info_menu(base_api, api_key, xdata_key, x_api_secret,
                              enc_field_key, id_token, access_token, my_msisdn);
@@ -1416,5 +1443,7 @@ void show_features_menu(const char* base_api, const char* api_key,
         else if (strcmp(ch, "7") == 0)
             auto_buy_menu(base_api, api_key, xdata_key, x_api_secret,
                           enc_field_key, id_token);
+        /* Kalau sub-menu minta unwind ke main (user pilih "99"), propagate. */
+        if (nav_should_return()) return;
     }
 }

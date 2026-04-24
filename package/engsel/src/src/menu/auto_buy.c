@@ -33,6 +33,7 @@
 #include "../include/client/engsel.h"
 #include "../include/util/json_util.h"
 #include "../include/util/file_util.h"
+#include "../include/util/nav.h"
 
 static void ab_clear(void) { printf("\033[H\033[J"); fflush(stdout); }
 
@@ -794,6 +795,7 @@ void auto_buy_menu(const char* base_api, const char* api_key,
         printf("  stop            Matikan worker yang jalan background\n");
         printf("  log             Tampilkan 20 baris log terakhir\n");
         printf("  00              Kembali\n");
+        printf("  99              Kembali ke menu utama\n");
         printf("Pilihan: ");
         fflush(stdout);
 
@@ -801,7 +803,8 @@ void auto_buy_menu(const char* base_api, const char* api_key,
         cmd[strcspn(cmd, "\n")] = 0;
 
         int num_arg;
-        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(arr); return; }
+        if (strcmp(cmd, "00") == 0) { cJSON_Delete(arr); return; }
+        else if (strcmp(cmd, "99") == 0) { cJSON_Delete(arr); nav_trigger_goto_main(); return; }
         else if (strcasecmp(cmd, "add") == 0 || strcasecmp(cmd, "a") == 0) {
             cJSON_Delete(arr);
             ab_add(base_api, api_key, xdata_key, x_api_secret, id_token);

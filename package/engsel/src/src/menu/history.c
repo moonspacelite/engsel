@@ -7,6 +7,7 @@
 #include "../include/client/engsel.h"
 #include "../include/util/json_util.h"
 #include "../include/util/phone.h"
+#include "../include/util/nav.h"
 
 #define W 55
 
@@ -98,11 +99,15 @@ void show_transaction_history_menu(const char* base_api, const char* api_key,
         }
         cJSON_Delete(res);
 
-        printf("0. Refresh\n99. Kembali\nPilih opsi: "); fflush(stdout);
+        printf("0.  Refresh\n"
+               "00. Kembali\n"
+               "99. Kembali ke menu utama\n"
+               "Pilih opsi: "); fflush(stdout);
         char ch[16];
         if (!fgets(ch, sizeof(ch), stdin)) return;
         ch[strcspn(ch, "\n")] = 0;
-        if (strcmp(ch, "99") == 0 || strcmp(ch, "00") == 0) return;
+        if (strcmp(ch, "00") == 0) return;
+        if (strcmp(ch, "99") == 0) { nav_trigger_goto_main(); return; }
         /* selain itu (termasuk "0") refresh otomatis via loop */
     }
 }
