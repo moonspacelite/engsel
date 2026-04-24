@@ -100,7 +100,8 @@ function api_dispatch()
 	if fn then
 		fn()
 	else
-		json_reply('{"error":"unknown endpoint","endpoint":"' .. action .. '"}')
+		local jsonc = require "luci.jsonc"
+		json_reply(jsonc.stringify({error = "unknown endpoint", endpoint = action}))
 	end
 end
 
@@ -161,7 +162,8 @@ local function auth_and_call(action, ...)
 	local idx = get_active_account_idx()
 	local auth, err = authenticate(idx)
 	if not auth then
-		json_reply('{"error":"auth_failed","detail":"' .. (err or "unknown") .. '"}')
+		local jsonc = require "luci.jsonc"
+		json_reply(jsonc.stringify({error = "auth_failed", detail = err or "unknown"}))
 		return
 	end
 	-- Export tokens as env for the backend
@@ -245,7 +247,9 @@ function api_login()
 	local env = string.format("ID_TOKEN=%s ACCESS_TOKEN=%s ",
 		shell_escape(result.id_token or ""),
 		shell_escape(result.access_token or ""))
-	local prof_raw = io.popen(env .. BACKEND .. " get_profile 2>/dev/null"):read("*a")
+	local prof_p = io.popen(env .. BACKEND .. " get_profile 2>/dev/null")
+	local prof_raw = prof_p and prof_p:read("*a") or "{}"
+	if prof_p then prof_p:close() end
 	local prof = json.parse(prof_raw or "{}")
 	if prof and prof.data and prof.data.profile then
 		subs_type = prof.data.profile.subscription_type or subs_type
