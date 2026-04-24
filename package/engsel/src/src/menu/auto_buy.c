@@ -164,7 +164,8 @@ static int ab_pick_option(const char* base_api, const char* api_key,
                           const char* id_token, const char* family_code,
                           ab_option_t* out) {
     printf("[*] Fetching family dari XL Store...\n");
-    const char* migs[] = { "NONE", "PRE_TO_PRIO_LEGACY", "PRE_TO_PRIO_NEW" };
+    /* Migration types sinkron dengan do_family_bruteforce (main.c:232) */
+    const char* migs[] = { "NONE", "PRE_TO_PRIOH", "PRIOH_TO_PRIO", "PRIO_TO_PRIOH" };
     int ents[] = { 0, 1 };
     cJSON* fam = NULL; int ent_found = 0; const char* mig_found = "NONE";
     for (size_t i = 0; i < sizeof(migs)/sizeof(migs[0]) && !fam; i++) {

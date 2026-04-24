@@ -719,7 +719,7 @@ static void transfer_pulsa_menu(const char* base_api,
  *       "migration_type": "NONE" }, ... ]
  *
  * Saat user "Tambah", kita fetch nama family via get_family() dengan kombinasi
- * (is_enterprise=0/1, migration=NONE/PRE_TO_PRIO_LEGACY/PRE_TO_PRIO_NEW) sampai
+ * (is_enterprise=0/1, migration=NONE/PRE_TO_PRIOH/PRIOH_TO_PRIO/PRIO_TO_PRIOH) sampai
  * salah satu mengembalikan `data.package_family.name`. Kombinasi yang berhasil
  * ikut disimpan supaya saat membeli tidak perlu trial ulang.
  * ------------------------------------------------------------------------- */
@@ -758,7 +758,8 @@ static int sf_resolve_family(const char* base_api, const char* api_key,
                              const char* id_token, const char* family_code,
                              char* out_name, size_t name_sz,
                              int* out_ent, char* out_mig, size_t mig_sz) {
-    const char* migrations[] = { "NONE", "PRE_TO_PRIO_LEGACY", "PRE_TO_PRIO_NEW" };
+    /* Migration types sinkron dengan do_family_bruteforce (main.c:232) */
+    const char* migrations[] = { "NONE", "PRE_TO_PRIOH", "PRIOH_TO_PRIO", "PRIO_TO_PRIOH" };
     int ents[] = { 0, 1 };
     for (size_t i = 0; i < sizeof(migrations)/sizeof(migrations[0]); i++) {
         for (size_t j = 0; j < sizeof(ents)/sizeof(ents[0]); j++) {
@@ -951,7 +952,8 @@ static cJSON* cd_fetch_family(const char* base_api, const char* api_key,
                               const char* xdata_key, const char* x_api_secret,
                               const char* id_token, const char* family_code,
                               int* out_ent, char* out_mig, size_t mig_sz) {
-    const char* migrations[] = { "NONE", "PRE_TO_PRIO_LEGACY", "PRE_TO_PRIO_NEW" };
+    /* Migration types sinkron dengan do_family_bruteforce (main.c:232) */
+    const char* migrations[] = { "NONE", "PRE_TO_PRIOH", "PRIOH_TO_PRIO", "PRIO_TO_PRIOH" };
     int ents[] = { 0, 1 };
     for (size_t i = 0; i < sizeof(migrations)/sizeof(migrations[0]); i++) {
         for (size_t j = 0; j < sizeof(ents)/sizeof(ents[0]); j++) {
