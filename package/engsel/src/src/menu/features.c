@@ -628,6 +628,33 @@ static void transfer_pulsa_menu(const char* base_api,
     printf(" Pastikan PIN transaksi MyXL sudah di-set di app MyXL.\n");
     printf("-------------------------------------------------------\n");
 
+    /* Guard: minimal Rp 5.000 saldo pulsa aktif */
+    printf("[*] Cek saldo pulsa aktif...\n");
+    double balance_rp = 0;
+    cJSON* bal_res = get_balance(base_api, api_key, xdata_key, x_api_secret, id_token);
+    if (bal_res) {
+        cJSON* data = cJSON_GetObjectItem(bal_res, "data");
+        if (data) {
+            cJSON* bal = cJSON_GetObjectItem(data, "balance");
+            if (bal) {
+                if (cJSON_IsObject(bal)) {
+                    cJSON* rem = cJSON_GetObjectItem(bal, "remaining");
+                    if (rem && cJSON_IsNumber(rem)) balance_rp = rem->valuedouble;
+                } else if (cJSON_IsNumber(bal)) {
+                    balance_rp = bal->valuedouble;
+                }
+            }
+        }
+        cJSON_Delete(bal_res);
+    }
+    printf(" Saldo pulsa saat ini: Rp %.0f\n", balance_rp);
+    if (balance_rp < 5000) {
+        printf("\n[!] Saldo tidak cukup. Minimal Rp 5.000 untuk Transfer Pulsa.\n");
+        pause_enter();
+        return;
+    }
+    printf("-------------------------------------------------------\n");
+
     char pin[16]; read_line("PIN 6 digit (99=batal): ", pin, sizeof(pin));
     if (strcmp(pin, "99") == 0 || strlen(pin) != 6) { printf("[!] Dibatalkan.\n"); pause_enter(); return; }
     for (int i = 0; i < 6; i++) {
