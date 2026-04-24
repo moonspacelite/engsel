@@ -289,6 +289,7 @@ static int ab_pick_decoy(const char* base_api, const char* api_key,
         for (int i = 0; i < total; i++) {
             cJSON* e = cJSON_GetArrayItem(ents, i);
             if (strcmp(json_get_str(e, "subs_type", ""), active_subs_type) == 0) {
+                if (nvis >= (int)(sizeof(real_map)/sizeof(real_map[0]))) break;
                 real_map[nvis++] = i;
             }
         }

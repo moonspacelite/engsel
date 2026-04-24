@@ -1071,6 +1071,7 @@ static void custom_decoy_menu(const char* base_api, const char* api_key,
             cJSON* e = cJSON_GetArrayItem(ents_arr, i);
             const char* st = json_get_str(e, "subs_type", "");
             if (strcmp(st, active_subs_type) == 0) {
+                if (nvis >= (int)(sizeof(real_map)/sizeof(real_map[0]))) break;
                 real_map[nvis++] = i + 1;
             }
         }
