@@ -835,10 +835,11 @@ static void sf_delete_entry(int idx_1based) {
         printf("[-] Nomor di luar range.\n"); cJSON_Delete(arr); return;
     }
     cJSON* item = cJSON_GetArrayItem(arr, idx_1based - 1);
-    const char* nm = json_get_str(item, "name", "?");
+    char* nm = strdup(json_get_str(item, "name", "?"));
     cJSON_DeleteItemFromArray(arr, idx_1based - 1);
-    if (sf_save_list(arr) == 0) printf("[+] Dihapus: %s\n", nm);
+    if (sf_save_list(arr) == 0) printf("[+] Dihapus: %s\n", nm ? nm : "?");
     else printf("[-] Gagal simpan ke %s\n", SAVED_FAMILY_PATH);
+    free(nm);
     cJSON_Delete(arr);
 }
 
