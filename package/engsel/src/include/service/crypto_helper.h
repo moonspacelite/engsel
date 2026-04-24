@@ -38,6 +38,20 @@ char* make_x_signature_bounty_allotment(const char* secret,
                                         const char* path,
                                         const char* destination_msisdn);
 
+/* balance allotment (transfer pulsa) signature.
+ *   key = "{SECRET};{sig_time_sec}#ae-hei_9Tee6he+Ik3Gais5=;{msisdn};POST;{path};{sig_time_sec}"
+ *   msg = "{access_token};{sig_time_sec};{msisdn};{amount};"
+ *
+ * Formula eksperimen — polanya mengikuti bounty_allotment tapi substitusi
+ * {token_confirmation}->{access_token}, {package_code}->{amount}. Kalau XL
+ * server reject dengan "signature not match", formula ini perlu disesuaikan. */
+char* make_x_signature_balance_allotment(const char* secret,
+                                         const char* access_token,
+                                         long sig_time_sec,
+                                         const char* receiver_msisdn,
+                                         int amount,
+                                         const char* path);
+
 /* loyalty settlement signature. */
 char* make_x_signature_loyalty(const char* secret,
                                long sig_time_sec,

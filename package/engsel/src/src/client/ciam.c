@@ -162,6 +162,12 @@ static char* generate_ax_device_id(void) {
     return dev_id;
 }
 
+/* Wrapper publik yang dipakai oleh module lain (transfer.c, dll). */
+char* ciam_helper_load_fingerprint(void) { return generate_ax_fingerprint(); }
+char* ciam_helper_device_id(void)        { return generate_ax_device_id(); }
+char* ciam_helper_timestamp_header(void) { return get_timestamp_header(); }
+void  ciam_helper_uuid_v4(char out[37])  { generate_uuid_v4(out); }
+
 static char* generate_ax_api_signature(const char* ts_for_sign, const char* contact,
                                        const char* code, const char* contact_type, const char* key_str) {
     if (!key_str) return strdup("dummy");

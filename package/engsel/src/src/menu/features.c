@@ -9,9 +9,16 @@
 #include "../include/client/famplan.h"
 #include "../include/client/store.h"
 #include "../include/client/redeem.h"
+#include "../include/client/transfer.h"
+#include "../include/client/engsel.h"
+#include "../include/menu/purchase_flow.h"
 #include "../include/service/crypto_aes.h"
 #include "../include/util/json_util.h"
+#include "../include/util/file_util.h"
 #include "../include/util/phone.h"
+
+/* Tipe kartu aktif global (didefinisikan di main.c). */
+extern char active_subs_type[32];
 
 /* ---------------------------------------------------------------------------
  * Helper utilities
@@ -448,6 +455,7 @@ static void famplan_menu(const char* base, const char* api_key,
  * STORE
  * ------------------------------------------------------------------------- */
 
+__attribute__((unused))
 static void store_menu(const char* base, const char* api_key,
                        const char* xdata_key, const char* sec,
                        const char* id_token) {
@@ -561,6 +569,7 @@ static void redeem_allotment_flow(const char* base, const char* api_key,
     dump_json("bounty_allotment", r); cJSON_Delete(r); pause_enter();
 }
 
+__attribute__((unused))
 static void redeem_menu(const char* base, const char* api_key,
                         const char* xdata_key, const char* sec,
                         const char* enc_field_key,
@@ -586,6 +595,523 @@ static void redeem_menu(const char* base, const char* api_key,
 }
 
 /* ---------------------------------------------------------------------------
+ * Transfer Pulsa (SHARE_BALANCE)
+ *
+ * Flow:
+ *   1. Minta PIN 6 digit dari user.
+ *   2. Minta receiver MSISDN (auto-normalize 08/62/+62).
+ *   3. Minta amount (Rp).
+ *   4. CIAM authorization-token/generate -> stage_token.
+ *   5. balance_allotment(stage_token, receiver, amount).
+ *
+ * Source: porting dari purplemashu/me-cli app/menus/sharing.py.
+ * Signature saat ini eksperimen (lihat crypto_helper.h).
+ * ------------------------------------------------------------------------- */
+
+static void transfer_pulsa_menu(const char* base_api,
+                                const char* api_key,
+                                const char* xdata_key,
+                                const char* x_api_secret,
+                                const char* id_token,
+                                const char* access_token) {
+    const char* base_ciam = getenv("BASE_CIAM_URL");
+    if (!base_ciam || !*base_ciam) {
+        printf("[-] BASE_CIAM_URL tidak di-set di .env\n");
+        pause_enter();
+        return;
+    }
+    const char* ua = getenv("UA");
+
+    printf("\n=======================================================\n");
+    printf("         TRANSFER PULSA (SHARE BALANCE)\n");
+    printf("=======================================================\n");
+    printf(" Pastikan PIN transaksi MyXL sudah di-set di app MyXL.\n");
+    printf("-------------------------------------------------------\n");
+
+    char pin[16]; read_line("PIN 6 digit (99=batal): ", pin, sizeof(pin));
+    if (strcmp(pin, "99") == 0 || strlen(pin) != 6) { printf("[!] Dibatalkan.\n"); pause_enter(); return; }
+    for (int i = 0; i < 6; i++) {
+        if (pin[i] < '0' || pin[i] > '9') { printf("[-] PIN harus 6 digit angka.\n"); pause_enter(); return; }
+    }
+
+    char raw_msisdn[32]; read_line("Receiver MSISDN (08xxx / 628xxx): ", raw_msisdn, sizeof(raw_msisdn));
+    if (strlen(raw_msisdn) == 0) { pause_enter(); return; }
+    char* receiver_norm = normalize_msisdn(raw_msisdn);
+    if (!receiver_norm) {
+        printf("[-] Nomor MSISDN tidak valid.\n"); pause_enter(); return;
+    }
+    char receiver[32];
+    snprintf(receiver, sizeof(receiver), "%s", receiver_norm);
+    free(receiver_norm);
+
+    char amt_str[16]; read_line("Amount transfer (Rp, min 5000): ", amt_str, sizeof(amt_str));
+    int amount = atoi(amt_str);
+    if (amount < 5000) { printf("[-] Amount minimal 5000.\n"); pause_enter(); return; }
+
+    printf("\n  Tujuan : %s\n  Amount : Rp %d\n", receiver, amount);
+    if (!read_yn("Lanjutkan? (y/n): ")) { printf("[!] Dibatalkan.\n"); pause_enter(); return; }
+
+    printf("[*] Minta authorization_code (SHARE_BALANCE) dari CIAM...\n");
+    char* stage_token = ciam_generate_share_balance_token(base_ciam, ua,
+                                                          access_token, pin, receiver);
+    if (!stage_token) {
+        printf("[-] Gagal dapat stage_token. Pastikan PIN benar & nomor tujuan valid.\n");
+        pause_enter(); return;
+    }
+
+    printf("[*] Kirim balance allotment...\n");
+    cJSON* res = balance_allotment(base_api, api_key, xdata_key, x_api_secret,
+                                   id_token, access_token, stage_token,
+                                   receiver, amount);
+    free(stage_token);
+
+    if (!res) {
+        printf("[-] Response balance_allotment NULL. Cek koneksi / signature.\n");
+        pause_enter(); return;
+    }
+
+    const char* status = json_get_str(res, "status", "");
+    if (strcmp(status, "SUCCESS") == 0) {
+        printf("[+] Transfer pulsa sukses.\n");
+    } else {
+        char* dump = cJSON_Print(res);
+        printf("[-] Transfer gagal. Response:\n%s\n", dump ? dump : "(null)");
+        free(dump);
+    }
+    cJSON_Delete(res);
+    pause_enter();
+}
+
+/* ---------------------------------------------------------------------------
+ * Simpan Family Code
+ *
+ * File storage: /etc/engsel/family_bookmark.json
+ * Format: array of objects
+ *   [ { "family_code": "...", "name": "Kuota 3GB", "is_enterprise": false,
+ *       "migration_type": "NONE" }, ... ]
+ *
+ * Saat user "Tambah", kita fetch nama family via get_family() dengan kombinasi
+ * (is_enterprise=0/1, migration=NONE/PRE_TO_PRIO_LEGACY/PRE_TO_PRIO_NEW) sampai
+ * salah satu mengembalikan `data.package_family.name`. Kombinasi yang berhasil
+ * ikut disimpan supaya saat membeli tidak perlu trial ulang.
+ * ------------------------------------------------------------------------- */
+
+static const char* SAVED_FAMILY_PATH = "/etc/engsel/family_bookmark.json";
+
+static cJSON* sf_load_list(void) {
+    size_t sz = 0;
+    char* raw = file_read_all(SAVED_FAMILY_PATH, &sz);
+    if (!raw || sz == 0) {
+        free(raw);
+        return cJSON_CreateArray();
+    }
+    cJSON* arr = cJSON_Parse(raw);
+    free(raw);
+    if (!arr || !cJSON_IsArray(arr)) {
+        cJSON_Delete(arr);
+        return cJSON_CreateArray();
+    }
+    return arr;
+}
+
+static int sf_save_list(cJSON* arr) {
+    char* out = cJSON_Print(arr);
+    if (!out) return -1;
+    int rc = file_write_atomic(SAVED_FAMILY_PATH, out);
+    free(out);
+    return rc;
+}
+
+/* Coba get_family untuk semua kombinasi is_enterprise/migration.
+ * Return 0 kalau ketemu; set out_name/out_ent/out_migration.
+ * Return -1 kalau semua gagal. */
+static int sf_resolve_family(const char* base_api, const char* api_key,
+                             const char* xdata_key, const char* x_api_secret,
+                             const char* id_token, const char* family_code,
+                             char* out_name, size_t name_sz,
+                             int* out_ent, char* out_mig, size_t mig_sz) {
+    const char* migrations[] = { "NONE", "PRE_TO_PRIO_LEGACY", "PRE_TO_PRIO_NEW" };
+    int ents[] = { 0, 1 };
+    for (size_t i = 0; i < sizeof(migrations)/sizeof(migrations[0]); i++) {
+        for (size_t j = 0; j < sizeof(ents)/sizeof(ents[0]); j++) {
+            cJSON* res = get_family(base_api, api_key, xdata_key, x_api_secret,
+                                    id_token, family_code, ents[j], migrations[i]);
+            if (!res) continue;
+            cJSON* data = cJSON_GetObjectItem(res, "data");
+            if (data) {
+                cJSON* pfam = cJSON_GetObjectItem(data, "package_family");
+                if (pfam) {
+                    const char* nm = json_get_str(pfam, "name", "");
+                    if (nm && nm[0]) {
+                        snprintf(out_name, name_sz, "%s", nm);
+                        *out_ent = ents[j];
+                        snprintf(out_mig, mig_sz, "%s", migrations[i]);
+                        cJSON_Delete(res);
+                        return 0;
+                    }
+                }
+            }
+            cJSON_Delete(res);
+        }
+    }
+    return -1;
+}
+
+static void sf_add_entry(const char* base_api, const char* api_key,
+                         const char* xdata_key, const char* x_api_secret,
+                         const char* id_token) {
+    char code[256]; read_line("Family Code (99=batal): ", code, sizeof(code));
+    if (strcmp(code, "99") == 0 || strlen(code) == 0) return;
+
+    printf("[*] Mencari nama family di XL Store...\n");
+    char name[256] = "", mig[64] = "NONE";
+    int ent = 0;
+    if (sf_resolve_family(base_api, api_key, xdata_key, x_api_secret, id_token,
+                          code, name, sizeof(name), &ent, mig, sizeof(mig)) != 0) {
+        printf("[-] Family code tidak ditemukan di XL Store.\n");
+        pause_enter();
+        return;
+    }
+
+    cJSON* arr = sf_load_list();
+    /* Cegah duplikat */
+    cJSON* it; int exists = 0;
+    cJSON_ArrayForEach(it, arr) {
+        const char* fc = json_get_str(it, "family_code", "");
+        if (strcmp(fc, code) == 0) { exists = 1; break; }
+    }
+    if (exists) {
+        printf("[-] Family code ini sudah tersimpan.\n");
+        cJSON_Delete(arr); pause_enter(); return;
+    }
+
+    cJSON* entry = cJSON_CreateObject();
+    cJSON_AddStringToObject(entry, "family_code", code);
+    cJSON_AddStringToObject(entry, "name", name);
+    cJSON_AddBoolToObject(entry, "is_enterprise", ent);
+    cJSON_AddStringToObject(entry, "migration_type", mig);
+    cJSON_AddItemToArray(arr, entry);
+
+    if (sf_save_list(arr) == 0) {
+        printf("[+] Disimpan: %s (%s)\n", name, code);
+    } else {
+        printf("[-] Gagal menyimpan ke %s\n", SAVED_FAMILY_PATH);
+    }
+    cJSON_Delete(arr);
+    pause_enter();
+}
+
+static void sf_delete_entry(int idx_1based) {
+    cJSON* arr = sf_load_list();
+    int n = cJSON_GetArraySize(arr);
+    if (idx_1based < 1 || idx_1based > n) {
+        printf("[-] Nomor di luar range.\n"); cJSON_Delete(arr); return;
+    }
+    cJSON* item = cJSON_GetArrayItem(arr, idx_1based - 1);
+    const char* nm = json_get_str(item, "name", "?");
+    cJSON_DeleteItemFromArray(arr, idx_1based - 1);
+    if (sf_save_list(arr) == 0) printf("[+] Dihapus: %s\n", nm);
+    else printf("[-] Gagal simpan ke %s\n", SAVED_FAMILY_PATH);
+    cJSON_Delete(arr);
+}
+
+static void saved_family_menu(const char* base_api, const char* api_key,
+                              const char* xdata_key, const char* x_api_secret,
+                              const char* id_token) {
+    while (1) {
+        printf("\n=======================================================\n");
+        printf("         SIMPAN FAMILY CODE\n");
+        printf("=======================================================\n");
+
+        cJSON* arr = sf_load_list();
+        int n = cJSON_GetArraySize(arr);
+        if (n == 0) {
+            printf(" (belum ada family code tersimpan)\n");
+        } else {
+            for (int i = 0; i < n; i++) {
+                cJSON* it = cJSON_GetArrayItem(arr, i);
+                printf("%2d. %s\n", i + 1, json_get_str(it, "name", "?"));
+                printf("    code: %s\n", json_get_str(it, "family_code", "?"));
+            }
+        }
+        printf("-------------------------------------------------------\n");
+        printf("Pilih nomor untuk beli, 'a' tambah, 'd N' hapus, '00' kembali: ");
+        fflush(stdout);
+
+        char cmd[64]; if (!fgets(cmd, sizeof(cmd), stdin)) { cJSON_Delete(arr); return; }
+        cmd[strcspn(cmd, "\n")] = 0;
+
+        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(arr); return; }
+        else if (strcmp(cmd, "a") == 0 || strcmp(cmd, "A") == 0) {
+            cJSON_Delete(arr);
+            sf_add_entry(base_api, api_key, xdata_key, x_api_secret, id_token);
+        }
+        else if ((cmd[0] == 'd' || cmd[0] == 'D') && (cmd[1] == ' ' || cmd[1] == '\0')) {
+            int idx = atoi(cmd + 1);
+            cJSON_Delete(arr);
+            sf_delete_entry(idx);
+            pause_enter();
+        }
+        else {
+            int idx = atoi(cmd);
+            if (idx >= 1 && idx <= n) {
+                cJSON* item = cJSON_GetArrayItem(arr, idx - 1);
+                char fc[256];
+                snprintf(fc, sizeof(fc), "%s", json_get_str(item, "family_code", ""));
+                cJSON_Delete(arr);
+                if (fc[0]) purchase_flow_by_family_code(fc);
+            } else {
+                cJSON_Delete(arr);
+            }
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------
+ * Custom Decoy
+ *
+ * File storage: /etc/engsel/custom_decoy.json
+ *   {
+ *     "active": 2,
+ *     "entries": [
+ *       { "subs_type": "PRIORITAS",
+ *         "family_code": "...", "variant_code": "...", "order": 1,
+ *         "name": "Akrab 50GB", "is_enterprise": false,
+ *         "migration_type": "NONE" }, ... ] }
+ *
+ * Menu hanya menampilkan entry yang subs_type-nya cocok dengan tipe kartu
+ * aktif (`active_subs_type`). Saat menambah, subs_type entry diset otomatis
+ * ke tipe kartu saat itu.
+ * ------------------------------------------------------------------------- */
+
+static const char* CUSTOM_DECOY_PATH = "/etc/engsel/custom_decoy.json";
+
+static cJSON* cd_load(void) {
+    size_t sz = 0;
+    char* raw = file_read_all(CUSTOM_DECOY_PATH, &sz);
+    if (!raw || sz == 0) {
+        free(raw);
+        cJSON* o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "active", 0);
+        cJSON_AddItemToObject(o, "entries", cJSON_CreateArray());
+        return o;
+    }
+    cJSON* o = cJSON_Parse(raw); free(raw);
+    if (!o) {
+        cJSON_Delete(o);
+        o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "active", 0);
+        cJSON_AddItemToObject(o, "entries", cJSON_CreateArray());
+        return o;
+    }
+    if (!cJSON_GetObjectItem(o, "active"))  cJSON_AddNumberToObject(o, "active", 0);
+    if (!cJSON_GetObjectItem(o, "entries")) cJSON_AddItemToObject(o, "entries", cJSON_CreateArray());
+    return o;
+}
+
+static int cd_save(cJSON* o) {
+    char* out = cJSON_Print(o);
+    if (!out) return -1;
+    int rc = file_write_atomic(CUSTOM_DECOY_PATH, out);
+    free(out);
+    return rc;
+}
+
+/* Fetch full family JSON untuk browse varian+opsi (coba kombinasi enterprise/migration). */
+static cJSON* cd_fetch_family(const char* base_api, const char* api_key,
+                              const char* xdata_key, const char* x_api_secret,
+                              const char* id_token, const char* family_code,
+                              int* out_ent, char* out_mig, size_t mig_sz) {
+    const char* migrations[] = { "NONE", "PRE_TO_PRIO_LEGACY", "PRE_TO_PRIO_NEW" };
+    int ents[] = { 0, 1 };
+    for (size_t i = 0; i < sizeof(migrations)/sizeof(migrations[0]); i++) {
+        for (size_t j = 0; j < sizeof(ents)/sizeof(ents[0]); j++) {
+            cJSON* r = get_family(base_api, api_key, xdata_key, x_api_secret,
+                                  id_token, family_code, ents[j], migrations[i]);
+            if (!r) continue;
+            cJSON* data = cJSON_GetObjectItem(r, "data");
+            if (data) {
+                cJSON* variants = cJSON_GetObjectItem(data, "package_variants");
+                if (variants && cJSON_GetArraySize(variants) > 0) {
+                    *out_ent = ents[j];
+                    snprintf(out_mig, mig_sz, "%s", migrations[i]);
+                    return r;
+                }
+            }
+            cJSON_Delete(r);
+        }
+    }
+    return NULL;
+}
+
+static void cd_add(const char* base_api, const char* api_key,
+                   const char* xdata_key, const char* x_api_secret,
+                   const char* id_token) {
+    printf("\n[*] Tipe kartu aktif untuk entry ini: %s\n", active_subs_type);
+
+    char code[256]; read_line("Family Code untuk decoy (99=batal): ", code, sizeof(code));
+    if (strcmp(code, "99") == 0 || strlen(code) == 0) return;
+
+    printf("[*] Fetching family dari XL Store...\n");
+    int ent = 0; char mig[64] = "NONE";
+    cJSON* fam = cd_fetch_family(base_api, api_key, xdata_key, x_api_secret,
+                                 id_token, code, &ent, mig, sizeof(mig));
+    if (!fam) { printf("[-] Family code tidak ditemukan.\n"); pause_enter(); return; }
+
+    /* Susun flat list (variant_code, order, option_code, name, price) */
+    typedef struct { const char* vc; int ord; const char* oc; const char* name; int price; } item_t;
+    item_t items[256]; int nitems = 0;
+    cJSON* data = cJSON_GetObjectItem(fam, "data");
+    cJSON* pfam = cJSON_GetObjectItem(data, "package_family");
+    const char* fam_name = json_get_str(pfam, "name", "?");
+    cJSON* variants = cJSON_GetObjectItem(data, "package_variants");
+    cJSON* v;
+    cJSON_ArrayForEach(v, variants) {
+        const char* vc = json_get_str(v, "package_variant_code", "");
+        cJSON* opts = cJSON_GetObjectItem(v, "package_options");
+        cJSON* o;
+        cJSON_ArrayForEach(o, opts) {
+            if (nitems >= 256) break;
+            items[nitems].vc    = vc;
+            items[nitems].ord   = cJSON_GetObjectItem(o, "order") ? cJSON_GetObjectItem(o, "order")->valueint : 0;
+            items[nitems].oc    = json_get_str(o, "package_option_code", "");
+            items[nitems].name  = json_get_str(o, "name", "?");
+            items[nitems].price = cJSON_GetObjectItem(o, "price") ? cJSON_GetObjectItem(o, "price")->valueint : 0;
+            nitems++;
+        }
+    }
+
+    if (nitems == 0) {
+        printf("[-] Family ini tidak punya opsi.\n"); cJSON_Delete(fam); pause_enter(); return;
+    }
+
+    printf("\n-------------------------------------------------------\n");
+    printf(" %s\n", fam_name);
+    printf("-------------------------------------------------------\n");
+    for (int i = 0; i < nitems; i++) {
+        printf("%2d. %s  (Rp %d)\n", i + 1, items[i].name, items[i].price);
+    }
+    printf("-------------------------------------------------------\n");
+    char pick[16]; read_line("Pilih nomor opsi (99=batal): ", pick, sizeof(pick));
+    if (strcmp(pick, "99") == 0) { cJSON_Delete(fam); return; }
+    int idx = atoi(pick);
+    if (idx < 1 || idx > nitems) {
+        printf("[-] Nomor di luar range.\n"); cJSON_Delete(fam); pause_enter(); return;
+    }
+    item_t* sel = &items[idx - 1];
+
+    cJSON* cfg = cd_load();
+    cJSON* ents_arr = cJSON_GetObjectItem(cfg, "entries");
+    cJSON* entry = cJSON_CreateObject();
+    cJSON_AddStringToObject(entry, "subs_type",      active_subs_type);
+    cJSON_AddStringToObject(entry, "family_code",    code);
+    cJSON_AddStringToObject(entry, "variant_code",   sel->vc);
+    cJSON_AddNumberToObject(entry, "order",          sel->ord);
+    cJSON_AddStringToObject(entry, "name",           sel->name);
+    cJSON_AddBoolToObject  (entry, "is_enterprise",  ent);
+    cJSON_AddStringToObject(entry, "migration_type", mig);
+    cJSON_AddItemToArray(ents_arr, entry);
+
+    if (cd_save(cfg) == 0) printf("[+] Decoy custom disimpan: %s\n", sel->name);
+    else                   printf("[-] Gagal simpan ke %s\n", CUSTOM_DECOY_PATH);
+    cJSON_Delete(cfg);
+    cJSON_Delete(fam);
+    pause_enter();
+}
+
+static void custom_decoy_menu(const char* base_api, const char* api_key,
+                              const char* xdata_key, const char* x_api_secret,
+                              const char* id_token) {
+    while (1) {
+        printf("\n=======================================================\n");
+        printf("         CUSTOM DECOY  (tipe kartu: %s)\n", active_subs_type);
+        printf("=======================================================\n");
+
+        cJSON* cfg = cd_load();
+        cJSON* ents_arr = cJSON_GetObjectItem(cfg, "entries");
+        cJSON* act = cJSON_GetObjectItem(cfg, "active");
+        int aidx = (act && cJSON_IsNumber(act)) ? act->valueint : 0;
+        int ntotal = cJSON_GetArraySize(ents_arr);
+
+        /* Display map: vis_idx (1..M) -> real_idx (1..N). M = jumlah entry
+         * yang subs_type-nya match. */
+        int real_map[512]; int nvis = 0;
+        for (int i = 0; i < ntotal; i++) {
+            cJSON* e = cJSON_GetArrayItem(ents_arr, i);
+            const char* st = json_get_str(e, "subs_type", "");
+            if (strcmp(st, active_subs_type) == 0) {
+                real_map[nvis++] = i + 1;
+            }
+        }
+
+        if (nvis == 0) {
+            printf(" (belum ada custom decoy untuk tipe %s)\n", active_subs_type);
+        } else {
+            for (int i = 0; i < nvis; i++) {
+                cJSON* e = cJSON_GetArrayItem(ents_arr, real_map[i] - 1);
+                int is_active = (real_map[i] == aidx);
+                printf("%2d. %s%s\n", i + 1, json_get_str(e, "name", "?"),
+                       is_active ? "   [ACTIVE]" : "");
+                printf("    family: %s  order: %d\n",
+                       json_get_str(e, "family_code", "?"),
+                       cJSON_GetObjectItem(e, "order") ? cJSON_GetObjectItem(e, "order")->valueint : 0);
+            }
+        }
+        if (aidx == 0) printf("\n (decoy aktif: default bawaan)\n");
+
+        printf("-------------------------------------------------------\n");
+        printf("'a' tambah, 'use N' set aktif, 'use 0' pakai default,\n");
+        printf("'d N' hapus, '00' kembali: ");
+        fflush(stdout);
+
+        char cmd[64]; if (!fgets(cmd, sizeof(cmd), stdin)) { cJSON_Delete(cfg); return; }
+        cmd[strcspn(cmd, "\n")] = 0;
+
+        if (strcmp(cmd, "00") == 0 || strcmp(cmd, "99") == 0) { cJSON_Delete(cfg); return; }
+        else if (strcmp(cmd, "a") == 0 || strcmp(cmd, "A") == 0) {
+            cJSON_Delete(cfg);
+            cd_add(base_api, api_key, xdata_key, x_api_secret, id_token);
+        }
+        else if (strncasecmp(cmd, "use ", 4) == 0) {
+            int v = atoi(cmd + 4);
+            int new_active = 0;
+            if (v == 0) new_active = 0;
+            else if (v >= 1 && v <= nvis) new_active = real_map[v - 1];
+            else { printf("[-] Nomor di luar range.\n"); cJSON_Delete(cfg); pause_enter(); continue; }
+            cJSON_ReplaceItemInObject(cfg, "active", cJSON_CreateNumber(new_active));
+            if (cd_save(cfg) == 0) {
+                if (new_active == 0) printf("[+] Decoy aktif: default bawaan\n");
+                else {
+                    cJSON* e = cJSON_GetArrayItem(ents_arr, new_active - 1);
+                    printf("[+] Decoy aktif: %s\n", json_get_str(e, "name", "?"));
+                }
+            } else printf("[-] Gagal simpan.\n");
+            cJSON_Delete(cfg); pause_enter();
+        }
+        else if (strncasecmp(cmd, "d ", 2) == 0) {
+            int v = atoi(cmd + 2);
+            if (v < 1 || v > nvis) { printf("[-] Nomor di luar range.\n"); cJSON_Delete(cfg); pause_enter(); continue; }
+            int real_idx = real_map[v - 1];
+            cJSON* e = cJSON_GetArrayItem(ents_arr, real_idx - 1);
+            const char* nm = json_get_str(e, "name", "?");
+            printf("Hapus %s? (y/n): ", nm);
+            if (read_yn("")) {
+                cJSON_DeleteItemFromArray(ents_arr, real_idx - 1);
+                /* Adjust active index */
+                if (aidx == real_idx) cJSON_ReplaceItemInObject(cfg, "active", cJSON_CreateNumber(0));
+                else if (aidx > real_idx) cJSON_ReplaceItemInObject(cfg, "active", cJSON_CreateNumber(aidx - 1));
+                if (cd_save(cfg) == 0) printf("[+] Dihapus.\n");
+                else printf("[-] Gagal simpan.\n");
+            }
+            cJSON_Delete(cfg); pause_enter();
+        }
+        else {
+            cJSON_Delete(cfg);
+        }
+    }
+}
+
+/* ---------------------------------------------------------------------------
  * Main dispatcher
  * ------------------------------------------------------------------------- */
 
@@ -597,25 +1123,29 @@ void show_features_menu(const char* base_api, const char* api_key,
     if (!id_token || !id_token[0]) { printf("[-] Belum login.\n"); return; }
     while (1) {
         printf("\n=== FITUR LANJUTAN ===\n"
-               "1. Circle (status, invite, remove, bonus)\n"
-               "2. Family Plan (members, change, limit, remove)\n"
-               "3. Store (family-list, search, segments, notifications)\n"
-               "4. Redeem (bounty/loyalty/allotment)\n"
+               "1. Circle\n"
+               "2. Family Plan/Akrab Organizer\n"
+               "3. Transfer Pulsa\n"
+               "4. Simpan Family Code\n"
+               "5. Custom Decoy\n"
                "00. Kembali\n"
+               "99. Menu utama\n"
                "Pilihan: ");
         fflush(stdout);
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) return;
         ch[strcspn(ch, "\n")] = 0;
-        if (strcmp(ch, "00") == 0) return;
+        if (strcmp(ch, "00") == 0 || strcmp(ch, "99") == 0) return;
         else if (strcmp(ch, "1") == 0)
             circle_info_menu(base_api, api_key, xdata_key, x_api_secret,
                              enc_field_key, id_token, access_token, my_msisdn);
         else if (strcmp(ch, "2") == 0)
             famplan_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
         else if (strcmp(ch, "3") == 0)
-            store_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
+            transfer_pulsa_menu(base_api, api_key, xdata_key, x_api_secret,
+                                id_token, access_token);
         else if (strcmp(ch, "4") == 0)
-            redeem_menu(base_api, api_key, xdata_key, x_api_secret,
-                        enc_field_key, id_token, access_token);
+            saved_family_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
+        else if (strcmp(ch, "5") == 0)
+            custom_decoy_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
     }
 }

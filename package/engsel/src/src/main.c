@@ -254,7 +254,87 @@ cJSON* do_family_bruteforce(const char* B_API, const char* API_KEY, const char* 
 }
 
 cJSON* fetch_decoy_package(const char* subs_type, const char* B_API, const char* API_KEY, const char* XDATA_KEY, const char* X_API_SEC, const char* id_tok) {
-    const char* file_name;
+    /* Custom decoy override: /etc/engsel/custom_decoy.json
+     *   { "active": 1, "entries": [ {family_code, variant_code, order,
+     *                                is_enterprise, migration_type, name}, ... ] }
+     * Jika active > 0 dan entries[active-1] valid, pakai itu. */
+    const char* file_name = NULL;
+    char *custom_raw = file_read_all("/etc/engsel/custom_decoy.json", NULL);
+    if (custom_raw) {
+        cJSON* cj = cJSON_Parse(custom_raw); free(custom_raw);
+        if (cj) {
+            cJSON* act = cJSON_GetObjectItem(cj, "active");
+            cJSON* ents = cJSON_GetObjectItem(cj, "entries");
+            int aidx = (act && cJSON_IsNumber(act)) ? act->valueint : 0;
+            if (aidx > 0 && ents && cJSON_IsArray(ents) && aidx <= cJSON_GetArraySize(ents)) {
+                cJSON* e = cJSON_GetArrayItem(ents, aidx - 1);
+                const char* e_subs = e ? json_get_str(e, "subs_type", "") : "";
+                /* cross-check: entry subs_type harus match tipe kartu aktif */
+                if (e && e_subs[0] && strcmp(e_subs, subs_type) != 0) {
+                    printf("[!] Custom decoy aktif (subs_type=%s) tidak sesuai "
+                           "tipe kartu aktif (%s). Fallback ke default.\n",
+                           e_subs, subs_type);
+                    e = NULL;
+                }
+                if (e) {
+                    const char* nm = json_get_str(e, "name", "");
+                    printf("[*] Pakai custom decoy aktif%s%s...\n",
+                           nm[0] ? ": " : "", nm[0] ? nm : "");
+                    cJSON* fc = cJSON_GetObjectItem(e, "family_code");
+                    cJSON* vc = cJSON_GetObjectItem(e, "variant_code");
+                    cJSON* ord = cJSON_GetObjectItem(e, "order");
+                    if (fc && vc && ord && cJSON_IsString(fc) && cJSON_IsString(vc)) {
+                        const char* f_code = fc->valuestring;
+                        const char* v_code = vc->valuestring;
+                        int target_order = ord->valueint;
+                        cJSON* ent_item = cJSON_GetObjectItem(e, "is_enterprise");
+                        cJSON* mig_item = cJSON_GetObjectItem(e, "migration_type");
+                        int is_ent = (ent_item && cJSON_IsTrue(ent_item)) ? 1 : 0;
+                        const char* mig_type = (mig_item && cJSON_IsString(mig_item))
+                                               ? mig_item->valuestring : "NONE";
+
+                        cJSON* fam = do_family_bruteforce(B_API, API_KEY, XDATA_KEY, X_API_SEC,
+                                                          id_tok, f_code, is_ent, mig_type);
+                        if (fam) {
+                            char opt_code[256] = {0};
+                            cJSON* data = cJSON_GetObjectItem(fam, "data");
+                            if (data) {
+                                cJSON* variants = cJSON_GetObjectItem(data, "package_variants");
+                                cJSON* variant;
+                                cJSON_ArrayForEach(variant, variants) {
+                                    cJSON* vcj = cJSON_GetObjectItem(variant, "package_variant_code");
+                                    if (vcj && strcmp(vcj->valuestring, v_code) == 0) {
+                                        cJSON* options = cJSON_GetObjectItem(variant, "package_options");
+                                        cJSON* opt;
+                                        cJSON_ArrayForEach(opt, options) {
+                                            cJSON* o = cJSON_GetObjectItem(opt, "order");
+                                            if (o && o->valueint == target_order) {
+                                                cJSON* oc = cJSON_GetObjectItem(opt, "package_option_code");
+                                                if (oc && cJSON_IsString(oc)) {
+                                                    strncpy(opt_code, oc->valuestring, sizeof(opt_code)-1);
+                                                }
+                                                break;
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                            cJSON_Delete(fam);
+                            if (opt_code[0]) {
+                                cJSON_Delete(cj);
+                                return get_package_detail(B_API, API_KEY, XDATA_KEY, X_API_SEC,
+                                                          id_tok, opt_code);
+                            }
+                        }
+                        printf("[!] Custom decoy gagal di-fetch, fallback ke default.\n");
+                    }
+                }
+            }
+            cJSON_Delete(cj);
+        }
+    }
+
     if (strcmp(subs_type, "PRIOHYBRID") == 0) { file_name = "/etc/engsel/decoy_data/decoy-priohybrid-balance.json"; }
     else if (strcmp(subs_type, "PRIORITAS") == 0) { file_name = "/etc/engsel/decoy_data/decoy-prio-balance.json"; }
     else { file_name = "/etc/engsel/decoy_data/decoy-prabayar-balance.json"; }
@@ -1014,14 +1094,14 @@ int main(void) {
         printf("1. Login/Ganti akun\n");
         printf("2. Lihat Paket Saya\n");
         printf("3. Beli Paket HOT 🔥\n");
-        printf("4. Beli Paket Berdasarkan Family Code\n");
-        printf("5. Beli Semua Paket di Family Code (loop)\n");
-        printf("6. Fitur Lanjutan (Circle / Family Plan)\n");
-        printf("7. Riwayat Transaksi\n");
-        printf("8. Beli by Option Code (manual)\n");
-        printf("9. Store Browse (Family List / Search / Segments / Redeem)\n");
+        printf("4. Beli Paket Berdasarkan Option Code\n");
+        printf("5. Beli Paket Berdasarkan Family Code\n");
+        printf("6. Beli Semua Paket di Family Code (loop)\n");
+        printf("7. Beli Paket di XL Store\n");
+        printf("8. Fitur Lanjutan\n");
+        printf("9. Riwayat Transaksi\n");
         printf("N. Notifikasi\n");
-        printf("R. Registrasi Kartu (Dukcapil NIK+KK)\n");
+        printf("R. Registrasi Kartu\n");
         printf("V. Validate MSISDN\n");
         printf("00. Bookmark Paket\n");
         printf("99. Tutup aplikasi\n");
@@ -1430,7 +1510,7 @@ int main(void) {
             }
             cJSON_Delete(hot_arr);
         }
-        else if (strcmp(choice, "4") == 0) {
+        else if (strcmp(choice, "5") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
@@ -1447,7 +1527,7 @@ int main(void) {
                 continue;
             }
         }
-        else if (strcmp(choice, "5") == 0) {
+        else if (strcmp(choice, "6") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
@@ -1669,7 +1749,7 @@ int main(void) {
             printf("=======================================================\n");
             printf("Tekan Enter untuk kembali ke menu utama..."); fflush(stdout); flush_stdin();
         }
-        else if (strcmp(choice, "6") == 0) {
+        else if (strcmp(choice, "8") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
@@ -1677,19 +1757,19 @@ int main(void) {
             show_features_menu(B_API, API_KEY, XDATA_KEY, X_API_SEC, ENC_FIELD_KEY,
                                id_tok, acc_tok, my_msisdn);
         }
-        else if (strcmp(choice, "7") == 0) {
+        else if (strcmp(choice, "9") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
             show_transaction_history_menu(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
         }
-        else if (strcmp(choice, "8") == 0) {
+        else if (strcmp(choice, "4") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
             show_buy_by_option_code();
         }
-        else if (strcmp(choice, "9") == 0) {
+        else if (strcmp(choice, "7") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
