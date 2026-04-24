@@ -1,3 +1,5 @@
+/* Forward-declared; implemented di features.c. Auto Buy menu dispatch lewat
+ * show_features_menu yang sudah menerima semua kredensial dibutuhkan.  */
 #ifndef ENGSEL_MENU_FEATURES_H
 #define ENGSEL_MENU_FEATURES_H
 

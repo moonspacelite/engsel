@@ -122,6 +122,24 @@ char *make_x_signature_bounty_allotment(const char *secret,
     return sig;
 }
 
+char *make_x_signature_balance_allotment(const char *secret,
+                                         const char *access_token,
+                                         long sig_time_sec,
+                                         const char *receiver_msisdn,
+                                         int amount,
+                                         const char *path) {
+    if (!secret || !access_token || !receiver_msisdn || !path) return NULL;
+
+    char *key = xvasprintf("%s;%ld#ae-hei_9Tee6he+Ik3Gais5=;%s;POST;%s;%ld",
+                           secret, sig_time_sec, receiver_msisdn, path, sig_time_sec);
+    char *msg = xvasprintf("%s;%ld;%s;%d;",
+                           access_token, sig_time_sec, receiver_msisdn, amount);
+    if (!key || !msg) { free(key); free(msg); return NULL; }
+    char *sig = hmac_hex(EVP_sha512(), key, msg);
+    free(key); free(msg);
+    return sig;
+}
+
 char *make_x_signature_loyalty(const char *secret,
                                long sig_time_sec,
                                const char *package_code,
