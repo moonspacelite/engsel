@@ -1,0 +1,20 @@
+{
+	"luci-app-engsel": {
+		"description": "Grant access to Engsel LuCI app",
+		"read": {
+			"ubus": {
+				"session": [ "access" ]
+			},
+			"file": {
+				"/etc/engsel/*": [ "read" ],
+				"/usr/libexec/engsel-luci": [ "exec" ]
+			}
+		},
+		"write": {
+			"file": {
+				"/etc/engsel/*": [ "write" ],
+				"/usr/libexec/engsel-luci": [ "exec" ]
+			}
+		}
+	}
+}
