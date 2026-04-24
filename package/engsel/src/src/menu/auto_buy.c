@@ -57,6 +57,10 @@ extern void ensure_token_fresh(cJSON* tokens_arr, const char* B_CIAM,
                                const char* B_API, const char* B_AUTH,
                                const char* UA, const char* API_KEY,
                                const char* XDATA_KEY, const char* X_API_SEC);
+extern void authenticate_and_fetch_balance(cJSON* tokens_arr, const char* B_CIAM,
+                                           const char* B_API, const char* B_AUTH,
+                                           const char* UA, const char* API_KEY,
+                                           const char* XDATA_KEY, const char* X_API_SEC);
 
 static const char* AB_CONFIG_PATH = "/etc/engsel/auto_buy.json";
 static const char* AB_PID_PATH    = "/var/run/engsel-autobuy.pid";
@@ -518,8 +522,9 @@ int auto_buy_worker_main(void) {
         fprintf(stderr, "[auto-buy] env/tokens tidak lengkap, exit\n");
         return 1;
     }
-    if (ab_read_pid() > 0) {
-        fprintf(stderr, "[auto-buy] worker lain masih aktif (PID=%d). Exit.\n", ab_read_pid());
+    pid_t existing = ab_read_pid();
+    if (existing > 0) {
+        fprintf(stderr, "[auto-buy] worker lain masih aktif (PID=%d). Exit.\n", (int)existing);
         return 2;
     }
     if (ab_write_pid() != 0) {
@@ -535,12 +540,26 @@ int auto_buy_worker_main(void) {
         iter++;
         time_t now = time(NULL);
         if (now >= next_refresh) {
-            ensure_token_fresh(tokens_arr, base_ciam, base_api, basic_auth, ua,
-                               api_key, xdata_key, x_api_secret);
-            next_refresh = now + 300;
+            /* Kalau id_tok kosong (refresh sebelumnya gagal atau belum pernah
+             * auth) -> panggil authenticate_and_fetch_balance langsung. Fungsi
+             * ini tidak butuh is_logged_in=1 dan akan men-set ulang is_logged_in
+             * saat sukses, sehingga ensure_token_fresh bisa dipakai lagi. */
+            if (!id_tok[0])
+                authenticate_and_fetch_balance(tokens_arr, base_ciam, base_api, basic_auth, ua,
+                                               api_key, xdata_key, x_api_secret);
+            else
+                ensure_token_fresh(tokens_arr, base_ciam, base_api, basic_auth, ua,
+                                   api_key, xdata_key, x_api_secret);
+            /* Kalau sukses maju 5 menit; kalau masih gagal retry 60 detik
+             * supaya transient error (DNS/jaringan) tidak memblokir worker. */
+            next_refresh = now + (id_tok[0] ? 300 : 60);
         }
 
-        if (!id_tok[0]) { ab_log("no active id_token (belum login / refresh gagal)"); sleep(30); continue; }
+        if (!id_tok[0]) {
+            ab_log("no active id_token (auth gagal, retry 60s)");
+            for (int w = 0; w < 60 && !g_ab_stop; w++) sleep(1);
+            continue;
+        }
 
         cJSON* arr = ab_load();
         int n = cJSON_GetArraySize(arr);
@@ -613,11 +632,17 @@ static void ab_tail_log(int n) {
     if (!f) { printf(" (log kosong)\n"); return; }
     /* naive tail: read all, keep last n lines */
     fseek(f, 0, SEEK_END); long sz = ftell(f);
+    if (sz <= 0) {
+        fclose(f);
+        if (sz == 0) printf(" (log kosong)\n");
+        return;
+    }
     fseek(f, 0, SEEK_SET);
-    char* buf = (char*)malloc(sz + 1);
+    char* buf = (char*)malloc((size_t)sz + 1);
     if (!buf) { fclose(f); return; }
-    if ((long)fread(buf, 1, sz, f) != sz) { /* ignore */ }
-    buf[sz] = 0; fclose(f);
+    size_t got = fread(buf, 1, (size_t)sz, f);
+    buf[got] = 0; fclose(f);
+    sz = (long)got;
     /* count newlines, find nth from end */
     int lines = 0;
     for (long i = sz - 1; i >= 0; i--) {
