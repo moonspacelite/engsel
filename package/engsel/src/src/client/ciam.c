@@ -59,11 +59,9 @@ static char* md5_hex(const char *input) {
  * time_delta_seconds ditambahkan ke WAKTU (mis. -300 untuk 5 menit sebelumnya),
  * tapi TZ offset selalu dipertahankan TZ_OFFSET_SEC (+0700).
  * Python reference: ts_gmt7_without_colon() di app/client/encrypt.py */
-static char* get_timestamp_with_ms(int time_delta_seconds) {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    time_t now = tv.tv_sec + TZ_OFFSET_SEC + time_delta_seconds;
-    int ms = tv.tv_usec / 1000;
+static char* format_ts_from_tv(const struct timeval* tv, int time_delta_seconds) {
+    time_t now = tv->tv_sec + TZ_OFFSET_SEC + time_delta_seconds;
+    int ms = tv->tv_usec / 1000;
     struct tm *t = gmtime(&now);
     char buf[64];
     int tz_hour = TZ_OFFSET_SEC / 3600;
@@ -75,8 +73,14 @@ static char* get_timestamp_with_ms(int time_delta_seconds) {
     return strdup(buf);
 }
 
-static char* get_ts_for_signature(void) {
-    return get_timestamp_with_ms(0);
+/* Legacy helpers — masing-masing panggil gettimeofday() baru.
+ * JANGAN pakai untuk signature pair (ts_for_sign + ts_header) karena ms
+ * bisa berbeda → server rekonstruksi tidak match. Gunakan format_ts_from_tv
+ * dengan satu timeval snapshot. */
+static char* get_timestamp_with_ms(int time_delta_seconds) {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return format_ts_from_tv(&tv, time_delta_seconds);
 }
 
 static char* get_timestamp_header(void) {
@@ -356,11 +360,20 @@ cJSON* submit_otp(const char* base_ciam_url, const char* basic_auth, const char*
              "contactType=%s&code=%s&grant_type=password&contact=%s&scope=openid",
              contact_type, code, final_contact);
 
-    char* ts_for_sign = get_ts_for_signature();
+    /* CRITICAL: ambil gettimeofday() SEKALI, pakai untuk ts_for_sign + ts_header.
+     * Python pakai 1 snapshot `now_gmt7` untuk keduanya (ms identik).
+     * Kalau kita panggil gettimeofday 2x, ms bisa beda antara ts_for_sign dan
+     * ts_header → server rekonstruksi signature dari ts_header+5min mis-match. */
+    struct timeval tv_now;
+    gettimeofday(&tv_now, NULL);
+    char* ts_for_sign = format_ts_from_tv(&tv_now, 0);
+    char* ts_hdr      = format_ts_from_tv(&tv_now, -300);
+
     char* signature = generate_ax_api_signature(ts_for_sign, final_contact, code, contact_type, ax_api_sig_key);
 
     if (getenv("ENGSEL_DEBUG")) {
         fprintf(stderr, "[DEBUG] ts_for_sign='%s'\n", ts_for_sign);
+        fprintf(stderr, "[DEBUG] ts_header  ='%s'\n", ts_hdr);
         fprintf(stderr, "[DEBUG] contact_type='%s'\n", contact_type);
         fprintf(stderr, "[DEBUG] contact='%s' (len=%zu)\n", final_contact, strlen(final_contact));
         fprintf(stderr, "[DEBUG] code='%s' (len=%zu)\n", code, strlen(code));
@@ -384,7 +397,6 @@ cJSON* submit_otp(const char* base_ciam_url, const char* basic_auth, const char*
     char* dev_id = generate_ax_device_id();
     char dev_id_hdr[256];
     snprintf(dev_id_hdr, sizeof(dev_id_hdr), "Ax-Device-Id: %s", dev_id);
-    char* ts_hdr = get_timestamp_header();
     char req_at[128];
     snprintf(req_at, sizeof(req_at), "Ax-Request-At: %s", ts_hdr);
     free(ts_hdr);
@@ -393,13 +405,21 @@ cJSON* submit_otp(const char* base_ciam_url, const char* basic_auth, const char*
     char req_id_hdr[128];
     snprintf(req_id_hdr, sizeof(req_id_hdr), "Ax-Request-Id: %s", req_id);
 
+    /* Order mirror Python app/client/ciam.py::submit_otp.headers.
+     * Accept-Encoding diurus libcurl via CURLOPT_ACCEPT_ENCODING="" di
+     * http_client.c — jangan tambah manual biar tidak double + auto-decode. */
     const char* headers[] = {
-        "Content-Type: application/x-www-form-urlencoded",
-        auth_hdr, ua_hdr, sig_hdr,
+        auth_hdr,
+        sig_hdr,
+        dev_id_hdr,
+        fp_hdr,
+        req_at,
         "Ax-Request-Device: samsung",
         "Ax-Request-Device-Model: SM-N935F",
+        req_id_hdr,
         "Ax-Substype: PREPAID",
-        fp_hdr, dev_id_hdr, req_at, req_id_hdr
+        "Content-Type: application/x-www-form-urlencoded",
+        ua_hdr,
     };
 
     struct HttpResponse* response = http_post(url, headers, 11, payload);
