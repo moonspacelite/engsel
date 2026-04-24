@@ -5,6 +5,7 @@
 #include <time.h>
 #include "../include/cJSON.h"
 #include "../include/menu/features.h"
+#include "../include/menu/auto_buy.h"
 #include "../include/client/circle.h"
 #include "../include/client/famplan.h"
 #include "../include/client/store.h"
@@ -1304,6 +1305,7 @@ void show_features_menu(const char* base_api, const char* api_key,
                "4. Simpan Family Code\n"
                "5. Custom Decoy\n"
                "6. Custom Paket HOT\n"
+               "7. Auto Buy\n"
                "00. Kembali\n"
                "99. Menu utama\n"
                "Pilihan: ");
@@ -1325,5 +1327,8 @@ void show_features_menu(const char* base_api, const char* api_key,
             custom_decoy_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
         else if (strcmp(ch, "6") == 0)
             custom_hot_menu(base_api, api_key, xdata_key, x_api_secret, id_token);
+        else if (strcmp(ch, "7") == 0)
+            auto_buy_menu(base_api, api_key, xdata_key, x_api_secret,
+                          enc_field_key, id_token);
     }
 }

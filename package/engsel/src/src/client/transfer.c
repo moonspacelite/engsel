@@ -126,7 +126,7 @@ cJSON* balance_allotment(const char* base_api_url,
                          const char* stage_token,
                          const char* receiver_msisdn,
                          int amount) {
-    if (!base_api_url || !api_key || !x_api_base_secret || !id_token ||
+    if (!base_api_url || !api_key || !xdata_key || !x_api_base_secret || !id_token ||
         !access_token || !stage_token || !receiver_msisdn) return NULL;
 
     const char* path = "sharings/api/v8/balance/allotment";

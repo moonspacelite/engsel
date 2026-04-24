@@ -16,6 +16,7 @@
 #include "../include/menu/history.h"
 #include "../include/menu/store_browse.h"
 #include "../include/menu/purchase_flow.h"
+#include "../include/menu/auto_buy.h"
 
 int active_account_idx = 0;
 double active_number = 0;
@@ -959,7 +960,12 @@ int purchase_flow_by_family_code(const char* f_code_in) {
     return goto_main;
 }
 
-int main(void) {
+int main(int argc, char** argv) {
+    int auto_buy_mode = 0;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--auto-buy") == 0) auto_buy_mode = 1;
+    }
+
     http_client_init();
     atexit(http_client_cleanup);
     load_env("/etc/engsel/.env");
@@ -981,6 +987,19 @@ int main(void) {
             free(json_data);
             if (parsed) { cJSON_Delete(tokens_arr); tokens_arr = parsed; g_tokens_arr = tokens_arr; }
         }
+    }
+
+    /* CLI mode: engsel --auto-buy -> jalankan worker loop dan exit.
+     * Butuh minimal 1 akun tersimpan; refresh-token otomatis di worker. */
+    if (auto_buy_mode) {
+        if (cJSON_GetArraySize(tokens_arr) == 0) {
+            fprintf(stderr, "[auto-buy] belum ada akun login di /etc/engsel/refresh-tokens.json\n");
+            return 1;
+        }
+        load_active_number(tokens_arr);
+        authenticate_and_fetch_balance(tokens_arr, B_CIAM, B_API, B_AUTH, UA,
+                                       API_KEY, XDATA_KEY, X_API_SEC);
+        return auto_buy_worker_main();
     }
 
     // ========== PENAMBAHAN: LOGIN AWAL JIKA BELUM ADA AKUN ==========
