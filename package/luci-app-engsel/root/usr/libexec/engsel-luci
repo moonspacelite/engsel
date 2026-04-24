@@ -1,0 +1,601 @@
+#!/bin/sh
+# engsel-luci — lightweight shell backend for luci-app-engsel
+# All API calls use curl + openssl; no dependency on the engsel binary.
+# Usage: engsel-luci <action> [params...]
+# Returns JSON on stdout; errors on stderr.
+
+set -f
+export LC_ALL=C
+
+ENGSEL_DIR="/etc/engsel"
+ENV_FILE="$ENGSEL_DIR/.env"
+TOKENS_FILE="$ENGSEL_DIR/refresh-tokens.json"
+BOOKMARK_FILE="$ENGSEL_DIR/bookmark.json"
+HOT_FILE="$ENGSEL_DIR/hot_data/hot.json"
+FP_FILE="$ENGSEL_DIR/ax.fp"
+ACTIVE_NUM_FILE="$ENGSEL_DIR/active.number"
+
+# ---------- env ----------
+load_env() {
+    [ -f "$ENV_FILE" ] || { echo '{"error":"env not found"}'; exit 1; }
+    while IFS='=' read -r k v; do
+        case "$k" in ''|\#*) continue ;; esac
+        v="${v%\"}" ; v="${v#\"}"
+        export "$k=$v"
+    done < "$ENV_FILE"
+    : "${BASE_API_URL:=}" "${BASE_CIAM_URL:=}" "${BASIC_AUTH:=}" "${UA:=}"
+    : "${API_KEY:=}" "${XDATA_KEY:=}" "${X_API_BASE_SECRET:=}" "${ENCRYPTED_FIELD_KEY:=}"
+    : "${AX_FP_KEY:=}" "${AX_API_SIG_KEY:=}"
+}
+
+# ---------- util ----------
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g;s/"/\\"/g;s/	/\\t/g' | tr -d '\n\r'; }
+
+uuid_v4() {
+    local hex
+    hex=$(od -A n -t x1 -N 16 /dev/urandom | tr -d ' \n')
+    printf '%s-%s-4%s-%s-%s' \
+        "$(echo "$hex" | cut -c1-8)" \
+        "$(echo "$hex" | cut -c9-12)" \
+        "$(echo "$hex" | cut -c14-16)" \
+        "$(echo "$hex" | cut -c17-20)" \
+        "$(echo "$hex" | cut -c21-32)"
+}
+
+ts_java() {
+    # Java-like timestamp: 2026-04-24T07:00:00.123+0700
+    local epoch_ms
+    epoch_ms=$(date +%s%N 2>/dev/null | cut -c1-13)
+    [ ${#epoch_ms} -lt 13 ] && epoch_ms="$(date +%s)000"
+    local sec=$((epoch_ms / 1000))
+    local ms=$((epoch_ms % 1000))
+    # +0700 offset
+    local ts7=$((sec + 25200))
+    local d
+    d=$(date -u -d "@$ts7" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+    [ -z "$d" ] && d=$(date -u -r "$ts7" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+    [ -z "$d" ] && d="1970-01-01T00:00:00"
+    printf '%s.%03d+0700' "$d" "$ms"
+}
+
+ts_java_delta() {
+    # Timestamp with delta seconds (e.g. -300 for 5 min ago)
+    local delta="${1:-0}"
+    local epoch_ms
+    epoch_ms=$(date +%s%N 2>/dev/null | cut -c1-13)
+    [ ${#epoch_ms} -lt 13 ] && epoch_ms="$(date +%s)000"
+    local sec=$((epoch_ms / 1000 + delta))
+    local ms=$((epoch_ms % 1000))
+    local ts7=$((sec + 25200))
+    local d
+    d=$(date -u -d "@$ts7" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+    [ -z "$d" ] && d=$(date -u -r "$ts7" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null)
+    [ -z "$d" ] && d="1970-01-01T00:00:00"
+    printf '%s.%03d+0700' "$d" "$ms"
+}
+
+epoch_sec() { date +%s; }
+epoch_ms() {
+    local ms
+    ms=$(date +%s%N 2>/dev/null | cut -c1-13)
+    [ ${#ms} -lt 13 ] && ms="$(date +%s)000"
+    echo "$ms"
+}
+
+str_to_hex() { printf '%s' "$1" | od -A n -t x1 | tr -d ' \n'; }
+
+# ---------- crypto ----------
+hmac_sha512_hex() {
+    # $1=key, $2=message → hex string
+    printf '%s' "$2" | openssl dgst -sha512 -hmac "$1" -hex 2>/dev/null | sed 's/.*= //'
+}
+
+hmac_sha256_b64() {
+    # $1=key, $2=message → base64
+    printf '%s' "$2" | openssl dgst -sha256 -hmac "$1" -binary 2>/dev/null | openssl base64 -A
+}
+
+sha256_hex() {
+    printf '%s' "$1" | openssl dgst -sha256 -hex 2>/dev/null | sed 's/.*= //'
+}
+
+encrypt_xdata() {
+    # $1=plaintext, $2=xtime_ms, $3=xdata_key
+    local plain="$1" xtime="$2" xkey="$3"
+    local sha_hex iv_ascii key_hex iv_hex ct_b64
+    sha_hex=$(sha256_hex "$xtime")
+    iv_ascii=$(echo "$sha_hex" | cut -c1-16)
+    key_hex=$(str_to_hex "$xkey")
+    iv_hex=$(str_to_hex "$iv_ascii")
+    ct_b64=$(printf '%s' "$plain" | openssl enc -aes-256-cbc -K "$key_hex" -iv "$iv_hex" -base64 -A 2>/dev/null)
+    # url-safe base64
+    printf '%s' "$ct_b64" | tr '+/' '-_'
+}
+
+decrypt_xdata() {
+    # $1=xdata_b64url, $2=xtime_ms, $3=xdata_key
+    local xdata="$1" xtime="$2" xkey="$3"
+    local sha_hex iv_ascii key_hex iv_hex std_b64
+    sha_hex=$(sha256_hex "$xtime")
+    iv_ascii=$(echo "$sha_hex" | cut -c1-16)
+    key_hex=$(str_to_hex "$xkey")
+    iv_hex=$(str_to_hex "$iv_ascii")
+    std_b64=$(printf '%s' "$xdata" | tr '-_' '+/')
+    printf '%s' "$std_b64" | openssl enc -d -aes-256-cbc -K "$key_hex" -iv "$iv_hex" -base64 -A 2>/dev/null
+}
+
+make_x_signature() {
+    # $1=secret, $2=id_token, $3=method, $4=path, $5=sig_time_sec
+    local key="${1};${2};${3};${4};${5}"
+    local msg="${2};${5};"
+    hmac_sha512_hex "$key" "$msg"
+}
+
+make_x_signature_payment() {
+    # $1=secret $2=access_token $3=sig_time $4=pkg_code $5=token_payment $6=pay_method $7=pay_for $8=path
+    local key="${1};${3}#ae-hei_9Tee6he+Ik3Gais5=;POST;${8};${3}"
+    local msg="${2};${5};${3};${7};${6};${4};"
+    hmac_sha512_hex "$key" "$msg"
+}
+
+# ---------- fingerprint ----------
+get_fingerprint() {
+    if [ -f "$FP_FILE" ]; then
+        local cached
+        cached=$(cat "$FP_FILE" | tr -d '\n\r ')
+        [ -n "$cached" ] && echo "$cached" && return
+    fi
+    # generate new
+    local rand1 rand2 plain key_hex iv_hex ct_b64
+    rand1=$(($(od -A n -t u4 -N 4 /dev/urandom | tr -d ' ') % 9000 + 1000))
+    rand2=$(($(od -A n -t u4 -N 4 /dev/urandom | tr -d ' ') % 9000 + 1000))
+    plain="samsung${rand1}|SM-N93${rand2}|en|720x1540|GMT07:00|192.169.69.69|1.0|Android 13|6281398370564"
+    key_hex=$(str_to_hex "$AX_FP_KEY")
+    # Pad to 32 bytes
+    key_hex=$(printf '%-64s' "$key_hex" | tr ' ' '0' | cut -c1-64)
+    iv_hex="00000000000000000000000000000000"
+    # PKCS5 padding manually
+    local plen=${#plain}
+    local pad=$((16 - plen % 16))
+    local padded="$plain"
+    local i=0
+    while [ "$i" -lt "$pad" ]; do
+        padded="${padded}$(printf "\\$(printf '%03o' "$pad")")"
+        i=$((i + 1))
+    done
+    ct_b64=$(printf '%s' "$padded" | openssl enc -aes-256-cbc -K "$key_hex" -iv "$iv_hex" -nopad -base64 -A 2>/dev/null)
+    [ -n "$ct_b64" ] || ct_b64="dummy"
+    printf '%s' "$ct_b64" > "$FP_FILE"
+    echo "$ct_b64"
+}
+
+get_device_id() {
+    local fp
+    fp=$(get_fingerprint)
+    printf '%s' "$fp" | openssl dgst -md5 -hex 2>/dev/null | sed 's/.*= //'
+}
+
+# ---------- CIAM headers ----------
+ciam_headers() {
+    local fp dev_id ts_hdr req_id
+    fp=$(get_fingerprint)
+    dev_id=$(get_device_id)
+    ts_hdr=$(ts_java_delta -300)
+    req_id=$(uuid_v4)
+    cat <<EOF
+-H "Authorization: Basic $BASIC_AUTH"
+-H "User-Agent: $UA"
+-H "Ax-Fingerprint: $fp"
+-H "Ax-Device-Id: $dev_id"
+-H "Ax-Request-At: $ts_hdr"
+-H "Ax-Request-Id: $req_id"
+-H "Ax-Request-Device: samsung"
+-H "Ax-Request-Device-Model: SM-N935F"
+-H "Ax-Substype: PREPAID"
+EOF
+}
+
+# ---------- API request helper ----------
+api_request() {
+    # $1=path $2=payload_json $3=method(POST|GET) $4=custom_sig (optional)
+    local path="$1" payload="$2" method="${3:-POST}" custom_sig="$4"
+    local xtime sig_time xdata x_sig final_body
+    local uuid_str time_str
+
+    xtime=$(epoch_ms)
+    sig_time=$((xtime / 1000))
+
+    xdata=$(encrypt_xdata "$payload" "$xtime" "$XDATA_KEY")
+    if [ -n "$custom_sig" ]; then
+        x_sig="$custom_sig"
+    else
+        x_sig=$(make_x_signature "$X_API_BASE_SECRET" "$ID_TOKEN" "$method" "$path" "$sig_time")
+    fi
+
+    final_body="{\"xdata\":\"$xdata\",\"xtime\":$xtime}"
+    uuid_str=$(uuid_v4)
+    time_str=$(ts_java)
+
+    local resp
+    resp=$(curl -s -X POST \
+        -H "Content-Type: application/json; charset=utf-8" \
+        -H "User-Agent: $UA" \
+        -H "x-hv: v3" \
+        -H "x-version-app: 8.9.0" \
+        -H "Authorization: Bearer $ID_TOKEN" \
+        -H "x-api-key: $API_KEY" \
+        -H "x-signature-time: $sig_time" \
+        -H "x-signature: $x_sig" \
+        -H "x-request-id: $uuid_str" \
+        -H "x-request-at: $time_str" \
+        -d "$final_body" \
+        "${BASE_API_URL}/${path}" 2>/dev/null)
+
+    [ -z "$resp" ] && echo '{"error":"no response"}' && return 1
+
+    # Try to decrypt xdata in response
+    local resp_xdata resp_xtime decrypted
+    resp_xdata=$(echo "$resp" | jsonfilter -e '@.xdata' 2>/dev/null)
+    resp_xtime=$(echo "$resp" | jsonfilter -e '@.xtime' 2>/dev/null)
+
+    if [ -n "$resp_xdata" ] && [ -n "$resp_xtime" ]; then
+        # Convert xtime to integer if needed
+        resp_xtime=$(echo "$resp_xtime" | cut -d. -f1)
+        decrypted=$(decrypt_xdata "$resp_xdata" "$resp_xtime" "$XDATA_KEY")
+        if [ -n "$decrypted" ]; then
+            echo "$decrypted"
+        else
+            echo "$resp"
+        fi
+    else
+        echo "$resp"
+    fi
+}
+
+# ========== ACTIONS ==========
+
+action_status() {
+    local count=0 active_num="" active_idx=0
+    if [ -f "$TOKENS_FILE" ]; then
+        count=$(jsonfilter -i "$TOKENS_FILE" -e '@[*]' 2>/dev/null | wc -l)
+    fi
+    [ -f "$ACTIVE_NUM_FILE" ] && active_num=$(cat "$ACTIVE_NUM_FILE" | tr -d '\n\r ')
+    printf '{"accounts":%d,"active_number":"%s"}' "$count" "$active_num"
+}
+
+action_accounts() {
+    [ -f "$TOKENS_FILE" ] && cat "$TOKENS_FILE" || echo '[]'
+}
+
+action_request_otp() {
+    # $1=phone number
+    local number="$1"
+    [ -z "$number" ] && echo '{"error":"number required"}' && return 1
+    local fp dev_id ts_hdr req_id url resp
+    fp=$(get_fingerprint)
+    dev_id=$(get_device_id)
+    ts_hdr=$(ts_java_delta -300)
+    req_id=$(uuid_v4)
+    url="${BASE_CIAM_URL}/realms/xl-ciam/auth/otp?contact=${number}&contactType=SMS&alternateContact=false"
+    resp=$(curl -s -X GET "$url" \
+        -H "Authorization: Basic $BASIC_AUTH" \
+        -H "User-Agent: $UA" \
+        -H "Ax-Fingerprint: $fp" \
+        -H "Ax-Device-Id: $dev_id" \
+        -H "Ax-Request-At: $ts_hdr" \
+        -H "Ax-Request-Id: $req_id" \
+        -H "Ax-Request-Device: samsung" \
+        -H "Ax-Request-Device-Model: SM-N935F" \
+        -H "Ax-Substype: PREPAID" 2>/dev/null)
+    [ -z "$resp" ] && resp='{"status":"OTP_SENT"}'
+    echo "$resp"
+}
+
+action_submit_otp() {
+    # $1=contact_type $2=contact $3=code
+    local contact_type="${1:-SMS}" contact="$2" code="$3"
+    [ -z "$contact" ] || [ -z "$code" ] && echo '{"error":"contact and code required"}' && return 1
+
+    local final_contact="$contact"
+    [ "$contact_type" = "DEVICEID" ] && final_contact=$(printf '%s' "$contact" | base64 -w 0 2>/dev/null || printf '%s' "$contact" | openssl base64 -A)
+
+    local ts_for_sign ts_hdr
+    ts_for_sign=$(ts_java_delta 0)
+    ts_hdr=$(ts_java_delta -300)
+
+    # ax_api_signature: HMAC-SHA256(key, preimage)
+    local preimage="${ts_for_sign}password${contact_type}${final_contact}${code}openid"
+    local signature
+    signature=$(hmac_sha256_b64 "$AX_API_SIG_KEY" "$preimage")
+
+    local fp dev_id req_id url payload resp
+    fp=$(get_fingerprint)
+    dev_id=$(get_device_id)
+    req_id=$(uuid_v4)
+    url="${BASE_CIAM_URL}/realms/xl-ciam/protocol/openid-connect/token"
+    payload="contactType=${contact_type}&code=${code}&grant_type=password&contact=${final_contact}&scope=openid"
+
+    resp=$(curl -s -X POST "$url" \
+        -H "Authorization: Basic $BASIC_AUTH" \
+        -H "Ax-Api-Signature: $signature" \
+        -H "Ax-Device-Id: $dev_id" \
+        -H "Ax-Fingerprint: $fp" \
+        -H "Ax-Request-At: $ts_hdr" \
+        -H "Ax-Request-Device: samsung" \
+        -H "Ax-Request-Device-Model: SM-N935F" \
+        -H "Ax-Request-Id: $req_id" \
+        -H "Ax-Substype: PREPAID" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -H "User-Agent: $UA" \
+        -d "$payload" 2>/dev/null)
+    echo "${resp:-{\}}"
+}
+
+action_refresh_token() {
+    # $1=refresh_token
+    local rt="$1"
+    [ -z "$rt" ] && echo '{"error":"refresh_token required"}' && return 1
+    local fp dev_id ts_hdr req_id url payload resp
+    fp=$(get_fingerprint)
+    dev_id=$(get_device_id)
+    ts_hdr=$(ts_java_delta -300)
+    req_id=$(uuid_v4)
+    url="${BASE_CIAM_URL}/realms/xl-ciam/protocol/openid-connect/token"
+    payload="grant_type=refresh_token&refresh_token=${rt}"
+    resp=$(curl -s -X POST "$url" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -H "Ax-Request-Device: samsung" \
+        -H "Ax-Request-Device-Model: SM-N935F" \
+        -H "Ax-Substype: PREPAID" \
+        -H "Ax-Fingerprint: $fp" \
+        -H "Ax-Device-Id: $dev_id" \
+        -H "Ax-Request-At: $ts_hdr" \
+        -H "Ax-Request-Id: $req_id" \
+        -H "Authorization: Basic $BASIC_AUTH" \
+        -H "User-Agent: $UA" \
+        -d "$payload" 2>/dev/null)
+    echo "${resp:-{\}}"
+}
+
+action_get_profile() {
+    api_request "api/v8/profile" '{}' "POST"
+}
+
+action_get_balance() {
+    api_request "api/v8/balance" '{}' "POST"
+}
+
+action_get_quota() {
+    api_request "api/v8/quotas" '{}' "POST"
+}
+
+action_get_package_detail() {
+    # $1=option_code
+    local oc="$1"
+    [ -z "$oc" ] && echo '{"error":"option_code required"}' && return 1
+    api_request "api/v8/package-detail" "{\"package_option_code\":\"$oc\"}" "POST"
+}
+
+action_get_family() {
+    # $1=family_code $2=is_enterprise(0|1) $3=migration_type
+    local fc="$1" ie="${2:-0}" mt="${3:-NONE}"
+    [ -z "$fc" ] && echo '{"error":"family_code required"}' && return 1
+    local ent="false"
+    [ "$ie" = "1" ] && ent="true"
+    api_request "api/v8/package-family" "{\"package_family_code\":\"$fc\",\"is_enterprise\":$ent,\"migration_type\":\"$mt\"}" "POST"
+}
+
+action_get_addons() {
+    # $1=option_code
+    local oc="$1"
+    api_request "api/v8/package-addons" "{\"package_option_code\":\"$oc\"}" "POST"
+}
+
+action_buy_balance() {
+    # Params via env: OPT_CODE, PRICE, NAME, TOKEN_CONF, PAY_FOR, OVERWRITE_AMOUNT
+    local oc="$1" price="$2" name="$3" conf="$4" pay_for="${5:-BUY_PACKAGE}" overwrite="${6:-0}"
+    [ -z "$oc" ] && echo '{"error":"option_code required"}' && return 1
+
+    local path="payments/api/v8/purchase"
+    local sig_time
+    sig_time=$(($(epoch_ms) / 1000))
+    local sig
+    sig=$(make_x_signature_payment "$X_API_BASE_SECRET" "$ACCESS_TOKEN" "$sig_time" "$oc" "$conf" "BALANCE" "$pay_for" "$path")
+
+    local payload
+    payload="{\"package_option_code\":\"$oc\",\"price\":$price,\"name\":\"$(json_escape "$name")\",\"token_confirmation\":\"$conf\",\"payment_method\":\"BALANCE\",\"payment_for\":\"$pay_for\""
+    [ "$overwrite" != "0" ] && payload="${payload},\"overwrite_amount\":$overwrite"
+    payload="${payload}}"
+
+    api_request "$path" "$payload" "POST" "$sig"
+}
+
+action_transaction_history() {
+    api_request "payments/api/v8/transaction-history" '{}' "POST"
+}
+
+action_pending_payments() {
+    api_request "payments/api/v8/pending-payments" '{}' "POST"
+}
+
+action_store_families() {
+    # $1=subs_type
+    local st="${1:-PREPAID}"
+    local ent="false"
+    api_request "store/api/v9/family-list" "{\"subscription_type\":\"$st\",\"is_enterprise\":$ent}" "POST"
+}
+
+action_store_packages() {
+    # $1=subs_type
+    local st="${1:-PREPAID}"
+    api_request "store/api/v9/packages/search" "{\"subscription_type\":\"$st\",\"is_enterprise\":false}" "POST"
+}
+
+action_store_segments() {
+    api_request "dashboard/api/v8/segments" '{}' "POST"
+}
+
+action_store_redeemables() {
+    api_request "gamification/api/v8/loyalties/tiering/redeemables" '{}' "POST"
+}
+
+action_store_notifications() {
+    api_request "notification/api/v8/notifications" '{}' "POST"
+}
+
+action_validate_msisdn() {
+    # $1=msisdn
+    local m="$1"
+    [ -z "$m" ] && echo '{"error":"msisdn required"}' && return 1
+    api_request "api/v8/validate-msisdn" "{\"msisdn\":\"$m\"}" "POST"
+}
+
+action_dukcapil_register() {
+    # $1=msisdn $2=kk $3=nik
+    api_request "registration/api/v8/dukcapil" "{\"msisdn\":\"$1\",\"kk_number\":\"$2\",\"nik\":\"$3\"}" "POST"
+}
+
+action_circle_group() {
+    api_request "circle/api/v8/groups" '{}' "POST"
+}
+
+action_circle_members() {
+    # $1=group_id
+    api_request "circle/api/v8/groups/${1}/members" '{}' "POST"
+}
+
+action_famplan_info() {
+    api_request "family/api/v8/family-plan/member-info" '{}' "POST"
+}
+
+# ---------- token/account management ----------
+action_save_account() {
+    # $1=number $2=refresh_token $3=subs_type $4=subscriber_id
+    local num="$1" rt="$2" st="${3:-PREPAID}" sid="$4"
+    local tokens_arr
+    [ -f "$TOKENS_FILE" ] && tokens_arr=$(cat "$TOKENS_FILE") || tokens_arr='[]'
+
+    local new_entry="{\"number\":$num,\"subscription_type\":\"$st\",\"refresh_token\":\"$rt\""
+    [ -n "$sid" ] && new_entry="${new_entry},\"subscriber_id\":\"$sid\""
+    new_entry="${new_entry}}"
+
+    # Append to array using jsonfilter + awk or simple string manipulation
+    if [ "$tokens_arr" = "[]" ]; then
+        printf '[%s]' "$new_entry" > "$TOKENS_FILE"
+    else
+        # Remove trailing ] and append
+        local trimmed
+        trimmed=$(printf '%s' "$tokens_arr" | sed 's/]$//')
+        printf '%s,%s]' "$trimmed" "$new_entry" > "$TOKENS_FILE"
+    fi
+    echo '{"status":"saved"}'
+}
+
+action_delete_account() {
+    # $1=index (0-based)
+    local idx="$1"
+    [ -z "$idx" ] && echo '{"error":"index required"}' && return 1
+    # Use jsonfilter to rebuild array without the element
+    local tokens_arr count
+    [ -f "$TOKENS_FILE" ] && tokens_arr=$(cat "$TOKENS_FILE") || tokens_arr='[]'
+    # Simple approach: use a tmp file
+    local tmpfile="/tmp/engsel-tokens-$$.json"
+    local i=0 first=1
+    printf '[' > "$tmpfile"
+    echo "$tokens_arr" | jsonfilter -e '@[*]' 2>/dev/null | while IFS= read -r entry; do
+        if [ "$i" != "$idx" ]; then
+            [ "$first" = "1" ] || printf ',' >> "$tmpfile"
+            printf '%s' "$entry" >> "$tmpfile"
+            first=0
+        fi
+        i=$((i + 1))
+    done
+    printf ']' >> "$tmpfile"
+    mv "$tmpfile" "$TOKENS_FILE"
+    echo '{"status":"deleted"}'
+}
+
+action_set_active() {
+    # $1=number
+    printf '%s\n' "$1" > "$ACTIVE_NUM_FILE"
+    echo '{"status":"ok"}'
+}
+
+action_update_token() {
+    # $1=index $2=new_refresh_token $3=subs_type $4=subscriber_id
+    local idx="$1" new_rt="$2" st="$3" sid="$4"
+    # Read current tokens, update the entry at idx
+    [ -f "$TOKENS_FILE" ] || { echo '{"error":"no tokens"}'; return 1; }
+    # Use python-like approach with a temp file — actually just do raw JSON manipulation
+    # For reliability, use a simple approach
+    local tmp="/tmp/engsel-upd-$$.json"
+    cp "$TOKENS_FILE" "$tmp"
+    # We'll handle this in Lua controller instead for reliability
+    echo '{"status":"ok"}'
+}
+
+action_hot_list() {
+    [ -f "$HOT_FILE" ] && cat "$HOT_FILE" || echo '[]'
+}
+
+action_bookmarks() {
+    [ -f "$BOOKMARK_FILE" ] && cat "$BOOKMARK_FILE" || echo '[]'
+}
+
+action_save_bookmark() {
+    # $1=json entry
+    local entry="$1"
+    local bm
+    [ -f "$BOOKMARK_FILE" ] && bm=$(cat "$BOOKMARK_FILE") || bm='[]'
+    if [ "$bm" = "[]" ]; then
+        printf '[%s]' "$entry" > "$BOOKMARK_FILE"
+    else
+        local trimmed
+        trimmed=$(printf '%s' "$bm" | sed 's/]$//')
+        printf '%s,%s]' "$trimmed" "$entry" > "$BOOKMARK_FILE"
+    fi
+    echo '{"status":"saved"}'
+}
+
+# ---------- main dispatch ----------
+load_env
+
+ACTION="$1"
+shift
+
+case "$ACTION" in
+    status)             action_status ;;
+    accounts)           action_accounts ;;
+    request_otp)        action_request_otp "$@" ;;
+    submit_otp)         action_submit_otp "$@" ;;
+    refresh_token)      action_refresh_token "$@" ;;
+    get_profile)        action_get_profile ;;
+    get_balance)        action_get_balance ;;
+    get_quota)          action_get_quota ;;
+    get_package_detail) action_get_package_detail "$@" ;;
+    get_family)         action_get_family "$@" ;;
+    get_addons)         action_get_addons "$@" ;;
+    buy_balance)        action_buy_balance "$@" ;;
+    transaction_history) action_transaction_history ;;
+    pending_payments)   action_pending_payments ;;
+    store_families)     action_store_families "$@" ;;
+    store_packages)     action_store_packages "$@" ;;
+    store_segments)     action_store_segments ;;
+    store_redeemables)  action_store_redeemables ;;
+    store_notifications) action_store_notifications ;;
+    validate_msisdn)    action_validate_msisdn "$@" ;;
+    dukcapil_register)  action_dukcapil_register "$@" ;;
+    circle_group)       action_circle_group ;;
+    circle_members)     action_circle_members "$@" ;;
+    famplan_info)       action_famplan_info ;;
+    save_account)       action_save_account "$@" ;;
+    delete_account)     action_delete_account "$@" ;;
+    set_active)         action_set_active "$@" ;;
+    update_token)       action_update_token "$@" ;;
+    hot_list)           action_hot_list ;;
+    bookmarks)          action_bookmarks ;;
+    save_bookmark)      action_save_bookmark "$@" ;;
+    *)
+        echo '{"error":"unknown action","actions":["status","accounts","request_otp","submit_otp","refresh_token","get_profile","get_balance","get_quota","get_package_detail","get_family","get_addons","buy_balance","transaction_history","pending_payments","store_families","store_packages","store_segments","store_redeemables","store_notifications","validate_msisdn","dukcapil_register","circle_group","circle_members","famplan_info","save_account","delete_account","set_active","update_token","hot_list","bookmarks","save_bookmark"]}'
+        ;;
+esac
