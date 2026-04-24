@@ -10,6 +10,7 @@
 #include "../include/client/store.h"
 #include "../include/client/engsel.h"
 #include "../include/util/json_util.h"
+#include "../include/util/nav.h"
 
 #define W 55
 extern double active_number;
@@ -78,7 +79,7 @@ void show_store_family_list_browse(const char* base, const char* key,
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) { cJSON_Delete(res); return; }
         ch[strcspn(ch, "\n")] = 0;
         if (strcmp(ch, "00") == 0) { cJSON_Delete(res); return; }
-        if (strcmp(ch, "99") == 0) { cJSON_Delete(res); return; }
+        if (strcmp(ch, "99") == 0) { cJSON_Delete(res); nav_trigger_goto_main(); return; }
         int sel = atoi(ch);
         if (sel > 0 && sel <= n) {
             cJSON* f = cJSON_GetArrayItem(list, sel - 1);
@@ -90,7 +91,10 @@ void show_store_family_list_browse(const char* base, const char* key,
             cJSON_Delete(res);
             if (fc_buf[0]) {
                 int goto_main = purchase_flow_by_family_code(fc_buf);
-                if (goto_main) return;
+                if (goto_main || nav_should_return()) {
+                    nav_trigger_goto_main();
+                    return;
+                }
             }
             continue;
         }
@@ -141,13 +145,15 @@ void show_store_packages_browse(const char* base, const char* key,
         printf("00. Kembali\n99. Menu utama\nPilih nomor paket: "); fflush(stdout);
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) { free(items); cJSON_Delete(res); return; }
         ch[strcspn(ch, "\n")] = 0;
-        if (strcmp(ch, "00") == 0 || strcmp(ch, "99") == 0) { free(items); cJSON_Delete(res); return; }
+        if (strcmp(ch, "00") == 0) { free(items); cJSON_Delete(res); return; }
+        if (strcmp(ch, "99") == 0) { free(items); cJSON_Delete(res); nav_trigger_goto_main(); return; }
         int sel = atoi(ch);
         if (sel > 0 && sel <= n) {
             const char* at = items[sel - 1].action_type;
             const char* ap = items[sel - 1].action_param;
             if (strcmp(at, "PDP") == 0 && ap[0]) {
                 purchase_flow_by_option_code(ap);
+                if (nav_should_return()) { free(items); cJSON_Delete(res); return; }
             } else {
                 printf("Action type %s belum didukung. Param: %s\n", at, ap);
                 pause_enter();
@@ -210,10 +216,11 @@ void show_store_segments_browse(const char* base, const char* key,
                 total++;
             }
         }
-        printf("00. Kembali\nPilih kode (mis. A1, B2): "); fflush(stdout);
+        printf("00. Kembali\n99. Menu utama\nPilih kode (mis. A1, B2): "); fflush(stdout);
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) { free(items); cJSON_Delete(res); return; }
         ch[strcspn(ch, "\n")] = 0; lower_in_place(ch);
         if (strcmp(ch, "00") == 0) { free(items); cJSON_Delete(res); return; }
+        if (strcmp(ch, "99") == 0) { free(items); cJSON_Delete(res); nav_trigger_goto_main(); return; }
         int found = 0;
         for (int i = 0; i < total; i++) {
             if (strcmp(items[i].code, ch) == 0) {
@@ -233,6 +240,7 @@ void show_store_segments_browse(const char* base, const char* key,
         if (!found) { printf("Kode tidak dikenal.\n"); pause_enter(); }
         free(items);
         cJSON_Delete(res);
+        if (nav_should_return()) return;
     }
 }
 
@@ -292,7 +300,8 @@ void show_redeemables_browse(const char* base, const char* key,
         printf("00. Kembali\n99. Menu utama\nPilih kode (mis. A1, B2): "); fflush(stdout);
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) { free(items); cJSON_Delete(res); return; }
         ch[strcspn(ch, "\n")] = 0; lower_in_place(ch);
-        if (strcmp(ch, "00") == 0 || strcmp(ch, "99") == 0) { free(items); cJSON_Delete(res); return; }
+        if (strcmp(ch, "00") == 0) { free(items); cJSON_Delete(res); return; }
+        if (strcmp(ch, "99") == 0) { free(items); cJSON_Delete(res); nav_trigger_goto_main(); return; }
         int found = 0;
         for (int i = 0; i < total; i++) {
             if (strcmp(items[i].code, ch) == 0) {
@@ -312,6 +321,7 @@ void show_redeemables_browse(const char* base, const char* key,
         if (!found) { printf("Kode tidak dikenal.\n"); pause_enter(); }
         free(items);
         cJSON_Delete(res);
+        if (nav_should_return()) return;
     }
 }
 
@@ -354,7 +364,8 @@ void show_notification_browse(const char* base, const char* key,
         printf("1. Tandai semua unread sebagai READ\n00. Kembali\n99. Menu utama\nPilih: "); fflush(stdout);
         char ch[16]; if (!fgets(ch, sizeof(ch), stdin)) { cJSON_Delete(res); return; }
         ch[strcspn(ch, "\n")] = 0;
-        if (strcmp(ch, "00") == 0 || strcmp(ch, "99") == 0) { cJSON_Delete(res); return; }
+        if (strcmp(ch, "00") == 0) { cJSON_Delete(res); return; }
+        if (strcmp(ch, "99") == 0) { cJSON_Delete(res); nav_trigger_goto_main(); return; }
         if (strcmp(ch, "1") == 0) {
             for (int i = 0; i < n; i++) {
                 cJSON* e = cJSON_GetArrayItem(list, i);

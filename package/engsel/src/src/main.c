@@ -17,6 +17,7 @@
 #include "../include/menu/store_browse.h"
 #include "../include/menu/purchase_flow.h"
 #include "../include/menu/auto_buy.h"
+#include "../include/util/nav.h"
 
 int active_account_idx = 0;
 double active_number = 0;
@@ -488,7 +489,7 @@ void handle_payment_menu(const char* B_CIAM, const char* B_API, const char* B_AU
         pay_choice[strcspn(pay_choice, "\n")] = 0; clean_input_string(pay_choice);
         
         if (strcmp(pay_choice, "00") == 0) { break; } 
-        else if (strcmp(pay_choice, "99") == 0) { *goto_main_flag = 1; break; }
+        else if (strcmp(pay_choice, "99") == 0) { *goto_main_flag = 1; nav_trigger_goto_main(); break; }
         else if ((strcmp(pay_choice, "F") == 0 || strcmp(pay_choice, "f") == 0) && family_code && family_code[0]) {
             int sub_goto_main = purchase_flow_by_family_code(family_code);
             if (sub_goto_main) { *goto_main_flag = 1; break; }
@@ -790,6 +791,7 @@ int purchase_flow_by_option_code(const char* option_code) {
                         f_code, NULL, &goto_main);
 
     cJSON_Delete(d_res);
+    if (goto_main) nav_trigger_goto_main();
     return goto_main;
 }
 
@@ -957,6 +959,7 @@ int purchase_flow_by_family_code(const char* f_code_in) {
     }
 
     cJSON_Delete(fam_res);
+    if (goto_main) nav_trigger_goto_main();
     return goto_main;
 }
 
@@ -1286,6 +1289,8 @@ int main(int argc, char** argv) {
 
     char choice[16];
     while (1) {
+        /* Reset flag "99 ke menu utama" setiap kali balik ke main loop. */
+        nav_reset();
         clear_screen();
         printf("=======================================================\n");
         if (is_logged_in) {
@@ -1990,11 +1995,14 @@ int main(int argc, char** argv) {
                 fflush(stdout);
                 char s[8]; if (!fgets(s, sizeof(s), stdin)) break;
                 s[strcspn(s, "\n")] = 0;
-                if (strcmp(s, "00") == 0 || strcmp(s, "99") == 0) break;
+                if (strcmp(s, "00") == 0) break;
+                else if (strcmp(s, "99") == 0) { nav_trigger_goto_main(); break; }
                 else if (strcmp(s, "1") == 0) show_store_family_list_browse(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok, active_subs_type);
                 else if (strcmp(s, "2") == 0) show_store_packages_browse(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok, active_subs_type);
                 else if (strcmp(s, "3") == 0) show_store_segments_browse(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
                 else if (strcmp(s, "4") == 0) show_redeemables_browse(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
+                /* Sub-menu store yang memanggil purchase_flow_*() bisa set flag. */
+                if (nav_should_return()) break;
             }
         }
         else if (strcmp(choice, "n") == 0 || strcmp(choice, "N") == 0) {
