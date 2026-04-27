@@ -7,6 +7,8 @@
 #include "../include/menu/discovery.h"
 #include "../include/menu/purchase_flow.h"
 #include "../include/client/store.h"
+#include "../include/client/engsel.h"
+#include "../include/util/file_util.h"
 #include "../include/util/json_util.h"
 #include "../include/util/nav.h"
 
@@ -414,6 +416,129 @@ static void show_tier_rewards(const char* base, const char* key,
     free(items);
 }
 
+/* ===== 5. Scan Semua Family (Matrix Bruteforce) =====
+ * Loop lewat saved_families (85 default) + brute kombinasi
+ * migration_type × is_enterprise. Tampilkan mana yang SUCCESS vs FAIL
+ * per family — berguna untuk mapping visibility tipe kartu aktif.
+ * NB: per-family cuma coba sampai dapat 1 SUCCESS (smart stop). */
+static const char* MIG_TYPES[] = {
+    "NORMAL", "NONE", "PRE_TO_PRIO", "PRIO_TO_PRE",
+    "PRE_TO_PRIOH", "PRIOH_TO_PRIO", "PRIO_TO_PRIOH"
+};
+#define N_MIG  (int)(sizeof(MIG_TYPES)/sizeof(MIG_TYPES[0]))
+
+static void show_scan_all_families(const char* base, const char* key,
+                                   const char* xdata, const char* sec,
+                                   const char* id_token) {
+    fx_clear();
+    rule('='); printf("  Discovery > Scan Semua Family (Matrix)\n"); rule('=');
+    printf("Subs type aktif: %s\n", active_subs_type);
+    printf("Membaca /etc/engsel/family_bookmark.json...\n");
+
+    size_t sz = 0;
+    char* raw = file_read_all("/etc/engsel/family_bookmark.json", &sz);
+    if (!raw || sz == 0) {
+        free(raw);
+        printf("[-] Belum ada saved family. Menu 8 > 4 > import dulu.\n");
+        pause_enter(); return;
+    }
+    cJSON* arr = cJSON_Parse(raw); free(raw);
+    if (!arr || !cJSON_IsArray(arr)) {
+        printf("[-] File tidak valid.\n"); cJSON_Delete(arr); pause_enter(); return;
+    }
+    int n = cJSON_GetArraySize(arr);
+    printf("Scan %d family × %d migration × 2 enterprise = up to %d requests\n",
+           n, N_MIG, n * N_MIG * 2);
+    printf("Press Enter to start, Ctrl+C to cancel...");
+    fflush(stdout); flush_line();
+
+    int n_ok = 0, n_fail = 0;
+    for (int i = 0; i < n; i++) {
+        cJSON* fam = cJSON_GetArrayItem(arr, i);
+        const char* name = json_get_str(fam, "name", "?");
+        const char* fc = json_get_str(fam, "family_code", "");
+        if (!fc[0]) continue;
+
+        int found = 0;
+        const char* ok_mig = "-"; int ok_ent = 0; int n_variants = 0;
+        for (int m = 0; m < N_MIG && !found; m++) {
+            for (int e = 0; e <= 1 && !found; e++) {
+                cJSON* r = get_family(base, key, xdata, sec, id_token, fc, e, MIG_TYPES[m]);
+                if (!r) continue;
+                if (json_status_is_success(r)) {
+                    cJSON* data = cJSON_GetObjectItemCaseSensitive(r, "data");
+                    cJSON* variants = data ? cJSON_GetObjectItemCaseSensitive(data, "package_variants") : NULL;
+                    int nv = cJSON_IsArray(variants) ? cJSON_GetArraySize(variants) : 0;
+                    if (nv > 0) {
+                        found = 1; ok_mig = MIG_TYPES[m]; ok_ent = e; n_variants = nv;
+                    }
+                }
+                cJSON_Delete(r);
+            }
+        }
+        if (found) {
+            printf("[%2d/%d] %-30.30s OK  mig=%s ent=%d var=%d\n",
+                   i+1, n, name, ok_mig, ok_ent, n_variants);
+            n_ok++;
+        } else {
+            printf("[%2d/%d] %-30.30s FAIL (all combos)\n", i+1, n, name);
+            n_fail++;
+        }
+    }
+    cJSON_Delete(arr);
+    rule('-');
+    printf("SUCCESS: %d / %d (%.1f%%)   FAIL: %d\n", n_ok, n, 100.0 * n_ok / (n ? n : 1), n_fail);
+    pause_enter();
+}
+
+/* ===== 6. Detail by Option Code =====
+ * GET detail raw (harga real, info variant, token_confirmation). */
+static void show_detail_by_option(const char* base, const char* key,
+                                  const char* xdata, const char* sec,
+                                  const char* id_token) {
+    (void)sec;
+    fx_clear();
+    rule('='); printf("  Discovery > Detail by Option Code\n"); rule('=');
+    printf("Masukkan package_option_code (00 batal): ");
+    fflush(stdout);
+    char oc[160];
+    if (!fgets(oc, sizeof(oc), stdin)) return;
+    oc[strcspn(oc, "\n")] = 0;
+    if (oc[0] == '\0' || strcmp(oc, "00") == 0) return;
+
+    /* engsel.h get_package_detail signature — api_secret param name is
+     * api_secret, but here our `sec` is x_api_secret. Pakai variabel yang sama. */
+    cJSON* res = get_package_detail(base, key, xdata, sec, id_token, oc);
+    if (!res) {
+        printf("[-] Tidak ada response.\n"); pause_enter(); return;
+    }
+    if (!json_status_is_success(res)) {
+        printf("[-] Gagal ambil detail.\n");
+        char* out = cJSON_Print(res); if (out) { printf("%s\n", out); free(out); }
+        cJSON_Delete(res); pause_enter(); return;
+    }
+    cJSON* data = cJSON_GetObjectItemCaseSensitive(res, "data");
+    cJSON* pfam = data ? cJSON_GetObjectItemCaseSensitive(data, "package_family") : NULL;
+    cJSON* popt = data ? cJSON_GetObjectItemCaseSensitive(data, "package_option") : NULL;
+    fx_clear();
+    rule('='); printf("  Detail Paket\n"); rule('=');
+    if (pfam) {
+        printf("Family       : %s\n", json_get_str(pfam, "name", "?"));
+        printf("Family code  : %s\n", json_get_str(pfam, "package_family_code", "?"));
+        printf("Payment for  : %s\n", json_get_str(pfam, "payment_for", "BUY_PACKAGE"));
+    }
+    if (popt) {
+        printf("Option       : %s\n", json_get_str(popt, "name", "?"));
+        printf("Option code  : %s\n", json_get_str(popt, "package_option_code", oc));
+        printf("Price        : Rp %d\n", json_get_int(popt, "price", 0));
+        printf("Validity     : %s\n", json_get_str(popt, "validity", "-"));
+    }
+    printf("Token confirm: %s\n", json_get_str(data, "token_confirmation", "-"));
+    rule('=');
+    cJSON_Delete(res);
+    pause_enter();
+}
+
 /* ===== Top-level menu ===== */
 
 void show_discovery_menu(const char* base_api, const char* api_key,
@@ -429,6 +554,8 @@ void show_discovery_menu(const char* base_api, const char* api_key,
                "2. Lihat rekomendasi paket\n"
                "3. Lihat banner promo (store + dynamic)\n"
                "4. Loyalty tier rewards (PRIO/PRIOHYBRID)\n"
+               "5. Scan semua family (matrix brute)\n"
+               "6. Detail by Option Code\n"
                "-------------------------------------------------------\n"
                "00. Kembali\n"
                "99. Menu utama\n"
@@ -446,6 +573,10 @@ void show_discovery_menu(const char* base_api, const char* api_key,
             show_promo_banners(base_api, api_key, xdata_key, x_api_secret, id_token);
         else if (strcmp(ch, "4") == 0)
             show_tier_rewards(base_api, api_key, xdata_key, x_api_secret, id_token);
+        else if (strcmp(ch, "5") == 0)
+            show_scan_all_families(base_api, api_key, xdata_key, x_api_secret, id_token);
+        else if (strcmp(ch, "6") == 0)
+            show_detail_by_option(base_api, api_key, xdata_key, x_api_secret, id_token);
         if (nav_should_return()) return;
     }
 }
