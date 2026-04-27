@@ -17,6 +17,7 @@
 #include "../include/menu/store_browse.h"
 #include "../include/menu/purchase_flow.h"
 #include "../include/menu/auto_buy.h"
+#include "../include/menu/discovery.h"
 #include "../include/util/nav.h"
 #include "../include/util/html2text.h"
 
@@ -231,10 +232,11 @@ char* normalize_phone_number(const char* input) {
 
 /* ========== FUNGSI ASLI (TIDAK DIUBAH) ========== */
 cJSON* do_family_bruteforce(const char* B_API, const char* API_KEY, const char* XDATA_KEY, const char* X_API_SEC, const char* id_tok, const char* f_code, int is_ent_override, const char* mig_override) {
-    const char* migrations[] = {"NONE", "PRE_TO_PRIOH", "PRIOH_TO_PRIO", "PRIO_TO_PRIOH"};
+    const char* migrations[] = {"NORMAL", "NONE", "PRE_TO_PRIO", "PRIO_TO_PRE",
+                                "PRE_TO_PRIOH", "PRIOH_TO_PRIO", "PRIO_TO_PRIOH"};
     int enterprises[] = {0, 1};
     cJSON* fam_res = NULL;
-    int mig_count = mig_override ? 1 : 4;
+    int mig_count = mig_override ? 1 : 7;
     int ent_count = is_ent_override != -1 ? 1 : 2;
 
     for (int i = 0; i < mig_count; i++) {
@@ -1004,21 +1006,24 @@ static void cli_print_help(const char* argv0) {
 "    5  Beli by family code     6  Beli semua di family (loop)\n"
 "    7  Beli paket di XL Store  8  Fitur Lanjutan (sub-menu)\n"
 "    9  Riwayat transaksi       N  Notifikasi\n"
-"    R  Registrasi kartu        V  Validate MSISDN\n"
-"    00 Bookmark paket          99 Keluar\n"
+"    R  Registrasi kartu        S  Cari Paket (discovery)\n"
+"    V  Validate MSISDN         00 Bookmark paket\n"
+"    99 Keluar\n"
 "\n"
 "  Fitur Lanjutan (menu 8)\n"
 "    1  Circle                  2  Family Plan / Akrab Organizer\n"
-"    3  Transfer Pulsa          4  Simpan Family Code\n"
+"    3  Transfer Pulsa          4  Simpan Family Code (85 default)\n"
 "    5  Custom Decoy            6  Custom Paket HOT\n"
-"    7  Auto Buy\n"
+"    7  Auto Buy                8  Discovery (search/rekomendasi/banner\n"
+"                                              /rewards/scan/detail)\n"
 "\n"
 "  Aksi di sub-menu (Simpan Family / Custom Decoy / Custom HOT / Auto Buy)\n"
 "    add                       Tambah entry baru\n"
 "    del <n>                   Hapus entry ke-n\n"
 "    toggle <n>                Aktifkan/nonaktifkan entry ke-n (Auto Buy)\n"
 "    use <n>                   Jadikan entry aktif (Custom Decoy)\n"
-"    reset                     Kembalikan ke bawaan (Custom HOT)\n"
+"    import                    Import 85 family code bawaan (Simpan Family)\n"
+"    reset                     Kembalikan ke bawaan (Custom HOT/Simpan Family)\n"
 "    start / stop              Jalankan/matikan worker (Auto Buy)\n"
 "    log                       Tail log terakhir (Auto Buy)\n"
 "    00                        Kembali ke menu sebelumnya\n"
@@ -1317,10 +1322,11 @@ int main(int argc, char** argv) {
         printf("5. Beli Paket Berdasarkan Family Code\n");
         printf("6. Beli Semua Paket di Family Code (loop)\n");
         printf("7. Beli Paket di XL Store\n");
-        printf("8. Fitur Lanjutan\n");
+        printf("8. Fitur Lanjutan (85 family, scan, decoy, dll)\n");
         printf("9. Riwayat Transaksi\n");
         printf("N. Notifikasi\n");
         printf("R. Registrasi Kartu\n");
+        printf("S. Cari Paket (discovery keyword)\n");
         printf("V. Validate MSISDN\n");
         printf("00. Bookmark Paket\n");
         printf("99. Tutup aplikasi\n");
@@ -2018,6 +2024,14 @@ int main(int argc, char** argv) {
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
             show_register_menu(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
+        }
+        else if (strcmp(choice, "s") == 0 || strcmp(choice, "S") == 0) {
+            /* Shortcut ke Discovery Menu — karena user sering butuh search
+             * langsung tanpa masuk Menu 8 > 8 dulu. */
+            if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
+            ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
+            if (!is_logged_in) continue;
+            show_discovery_menu(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
         }
         else if (strcmp(choice, "v") == 0 || strcmp(choice, "V") == 0) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }

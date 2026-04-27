@@ -1,0 +1,342 @@
+[
+  {
+    "name": "Special Ramadan",
+    "family_code": "3b723f46-856e-45dd-aa3a-6c68dd1e9ded"
+  },
+  {
+    "name": "Roaming Combo Unlimited",
+    "family_code": "0d7f6f19-9444-46ad-8c22-04bcf01a6adb"
+  },
+  {
+    "name": "FlexMax",
+    "family_code": "2c292a32-7749-4947-8ab2-1d83928eae70"
+  },
+  {
+    "name": "FlexMini",
+    "family_code": "22cfa6c3-ba3f-4f4b-8837-e7fe247d7da8"
+  },
+  {
+    "name": "XL Ultra 5G",
+    "family_code": "4632cfca-72d8-417e-b790-d7ab3a7825f6"
+  },
+  {
+    "name": "Swadaya",
+    "family_code": "17edc338-402e-412f-acc4-3f24009cfeaa"
+  },
+  {
+    "name": "PASS LITE",
+    "family_code": "7fed7aa1-946f-44ce-9eb4-488a7e15c68a"
+  },
+  {
+    "name": "Prio Ultra 5G",
+    "family_code": "35fad49d-c45f-4e71-adb2-81b2cbdcd4ec"
+  },
+  {
+    "name": "Prio Ultra 5G Hybrid",
+    "family_code": "605d239c-c618-492b-b6a3-4b86072c69a3"
+  },
+  {
+    "name": "XL Prioritas Unlimited [Coid] / myPRIO DEAL 5.0 Unlimited 24m",
+    "family_code": "25c30813-307a-494e-bb33-793fe1ba0bee"
+  },
+  {
+    "name": "myPRIO X Unlimited (alt)",
+    "family_code": "19134305-27f1-48ea-be9d-afc425e60aca"
+  },
+  {
+    "name": "PRIO Ultima",
+    "family_code": "3f7d38a7-31dd-4a69-8f14-ce8a67a5bc5e"
+  },
+  {
+    "name": "PRIO Diamond",
+    "family_code": "28701d4d-5214-4018-8a51-3800400f270f"
+  },
+  {
+    "name": "PRIO Platinum",
+    "family_code": "1dc8c030-ded7-42b9-9749-999ca78fbecf"
+  },
+  {
+    "name": "PRIO Gold",
+    "family_code": "ed61e5e0-0c9c-48a8-a93c-d53a87bd6ab3"
+  },
+  {
+    "name": "PRIO Silver",
+    "family_code": "e5675dc0-3b4b-4d23-ae45-4dbd22228849"
+  },
+  {
+    "name": "Platinum Mobile",
+    "family_code": "70c7fb5b-6b4e-4548-b89e-0e0cf2d610ff"
+  },
+  {
+    "name": "Vidio",
+    "family_code": "b72a709a-cf8e-41a2-a0e1-eab2af4b3116"
+  },
+  {
+    "name": "Call & SMS (#1)",
+    "family_code": "9e5c85ac-ff31-4d0a-a1c8-e8939f2cd08e"
+  },
+  {
+    "name": "Call & SMS (#2)",
+    "family_code": "7a56f9b3-e893-462d-bfde-2ddd813d0660"
+  },
+  {
+    "name": "Apps Quota (#1)",
+    "family_code": "9e694f78-eb8f-4aab-badc-4726e87ef213"
+  },
+  {
+    "name": "Apps Quota (#2)",
+    "family_code": "2fc1caea-04f6-4ddb-b8e5-ffc34be6e743"
+  },
+  {
+    "name": "PRIO Booster (#1)",
+    "family_code": "8f0c6f2e-7984-4dcc-afad-9563b4beb851"
+  },
+  {
+    "name": "PRIO Booster (#2)",
+    "family_code": "12d8ca9f-1b2e-439a-9a93-0480717efa54"
+  },
+  {
+    "name": "PRIO Booster (#3)",
+    "family_code": "0d9d072c-3dab-4f72-88cd-31c5b8dc8c6b"
+  },
+  {
+    "name": "VIU",
+    "family_code": "39413cf6-fb3f-4d81-bf2d-e81d5c5dd7e4"
+  },
+  {
+    "name": "CatchPlay+",
+    "family_code": "6ee3266f-6b47-4ba3-b5a9-eea9c3ab4893"
+  },
+  {
+    "name": "QRIS-decoy stub",
+    "family_code": "580c1f94-7dc4-416e-96f6-8faf26567516"
+  },
+  {
+    "name": "Kuota Aplikasi BIZ 2GB",
+    "family_code": "c6f2cd72-8b21-420a-b8d5-e0186afe5be6"
+  },
+  {
+    "name": "Conference (BIZ)",
+    "family_code": "5dab52d5-6f02-4678-b72f-088396ceb113"
+  },
+  {
+    "name": "Promo Upgrade Plan Disc 15%",
+    "family_code": "49c5e9bc-704b-4bae-a387-36661706bd3b"
+  },
+  {
+    "name": "Promo Booster",
+    "family_code": "8e9ce0c9-67ce-43d7-b241-f55c94f49b1b"
+  },
+  {
+    "name": "Promo Reload Flex Free 1GB",
+    "family_code": "edd9d18c-1c87-4b71-b86e-2384a7b64a9e"
+  },
+  {
+    "name": "Top Up Balance",
+    "family_code": "8fa64bbc-8bb5-49b6-a965-6649e4b34a7b"
+  },
+  {
+    "name": "Migrate to PRIORITAS",
+    "family_code": "e4d31425-d479-4725-9c97-f3ee2716c703"
+  },
+  {
+    "name": "PRIORITAS Registration",
+    "family_code": "af91a5be-fc66-4d6e-9ca6-c1c32eeef252"
+  },
+  {
+    "name": "Lifestyle (PRIO)",
+    "family_code": "139bc83b-c2a1-4bc5-b659-902ac1452070"
+  },
+  {
+    "name": "Video",
+    "family_code": "70457d57-d98e-4310-b500-8c6a02bfbacc"
+  },
+  {
+    "name": "Music",
+    "family_code": "f1e59dba-d197-479f-9eef-3279b46edd41"
+  },
+  {
+    "name": "Games",
+    "family_code": "8ba31b6e-e6a9-4ac8-9433-68b0a42260f4"
+  },
+  {
+    "name": "Huawei E5577 Max",
+    "family_code": "61c220a9-17a1-4c00-8aae-9a0cc9d7ce93"
+  },
+  {
+    "name": "Huawei E5573",
+    "family_code": "4fa99ad6-7c15-4ef7-b647-abde53e5d7f1"
+  },
+  {
+    "name": "HKM 001",
+    "family_code": "8f9be870-dfa3-4919-99fb-402667afc14d"
+  },
+  {
+    "name": "Xtream Ultima Smartphone 4G",
+    "family_code": "2be1138b-2844-46c2-a3c9-798ccbbf940e"
+  },
+  {
+    "name": "VIVO S1",
+    "family_code": "df1f143d-9e4c-472f-927c-067ba28fa47c"
+  },
+  {
+    "name": "Xtream 2 Smartphone 4G",
+    "family_code": "a1693cf6-e75f-47b4-9489-0fbba203ce9c"
+  },
+  {
+    "name": "Prio Ultra 5G+ MAX",
+    "family_code": "11f4eafd-5ad1-46d6-9e8c-7b2d93edb76e"
+  },
+  {
+    "name": "Video & Music",
+    "family_code": "05c159a8-5f64-4bb5-9ec3-7b47c8dfb7c5"
+  },
+  {
+    "name": "eSIM",
+    "family_code": "08a1fedb-8a04-43e3-b7c2-4708ffdf4480"
+  },
+  {
+    "name": "Vidio Platinum",
+    "family_code": "18d5ea5c-c1bf-4450-9f3e-43b40ef69dad"
+  },
+  {
+    "name": "Call & SMS to Other Operator",
+    "family_code": "1913a217-f533-450f-9bdc-8130fd316646"
+  },
+  {
+    "name": "Vidio",
+    "family_code": "2a25d9c7-5087-4efe-a22e-e754c8885515"
+  },
+  {
+    "name": "Social Media",
+    "family_code": "2f2ecdb9-0766-4e15-b4de-000b2d6ce359"
+  },
+  {
+    "name": "BIZ Ultra 5G+",
+    "family_code": "437875ac-c2ef-46a3-9a0d-25975efa3fa2"
+  },
+  {
+    "name": "Extend Active Period",
+    "family_code": "44e8b7fa-63ee-490a-9ac2-9308be4a4310"
+  },
+  {
+    "name": "BIZ Data+",
+    "family_code": "53de8ac3-521d-43f5-98ce-749ad0481709"
+  },
+  {
+    "name": "Booster Akrab",
+    "family_code": "5452eed8-91f3-4e9c-b7bb-0985759d5440"
+  },
+  {
+    "name": "Work & School",
+    "family_code": "5d63dddd-4f90-4f4c-8438-2f005c20151f"
+  },
+  {
+    "name": "Exclusive in myXL",
+    "family_code": "6025bac8-8669-4cdb-ae5e-649c4a0124db"
+  },
+  {
+    "name": "KlikFilm Premium",
+    "family_code": "6ce4d213-ff51-4c96-b78c-9c9e273ed5c8"
+  },
+  {
+    "name": "Akrab",
+    "family_code": "6e469cb2-443d-402f-ba77-681b032ead6a"
+  },
+  {
+    "name": "Starter Pack",
+    "family_code": "6e9b8127-4592-4f3a-a2e1-60e062046763"
+  },
+  {
+    "name": "Umroh Plus",
+    "family_code": "7360a68a-737c-467d-b617-3022ff0a9235"
+  },
+  {
+    "name": "Umrah & Hajj",
+    "family_code": "81315a88-377c-403b-b132-8b4968c5790f"
+  },
+  {
+    "name": "Viu Premium",
+    "family_code": "842d882a-5f7a-4b52-a2f9-db35e557321b"
+  },
+  {
+    "name": "All Operators",
+    "family_code": "8a8b0f20-4bff-4596-939b-a5cf2dc860b5"
+  },
+  {
+    "name": "Navigation",
+    "family_code": "971dd733-602a-4440-abdd-9dbe9bfa951d"
+  },
+  {
+    "name": "BIZ Prepaid",
+    "family_code": "9bab710b-6bcb-486b-980f-46f434c31bc4"
+  },
+  {
+    "name": "Monthly Booster",
+    "family_code": "9fd4184d-7230-4b68-8253-1ac954328c1a"
+  },
+  {
+    "name": "Xtra Combo Mini",
+    "family_code": "ad176860-49d4-4bdd-9161-ab38dc6a631b"
+  },
+  {
+    "name": "Disney+",
+    "family_code": "af6a739f-dda7-459f-afcd-30768f486659"
+  },
+  {
+    "name": "Xtra Main Quota",
+    "family_code": "b903c49b-04bb-41cc-bdce-d103f151bd5c"
+  },
+  {
+    "name": "WeTV VIP",
+    "family_code": "bb34204c-4608-4772-b6a6-5f43fa3e6185"
+  },
+  {
+    "name": "Daily Booster",
+    "family_code": "bd8a9bdd-2dd8-419b-827e-f5aa0e423ea8"
+  },
+  {
+    "name": "Garena Shell",
+    "family_code": "bf08d3dc-1f81-41b5-83e9-119beb0ff00f"
+  },
+  {
+    "name": "Umrah Plus",
+    "family_code": "c0051eda-6dbb-40fd-a50c-52802e0fcb3c"
+  },
+  {
+    "name": "XL Berbagi",
+    "family_code": "c8b95237-cca6-4582-af8e-28d77661954c"
+  },
+  {
+    "name": "Vidio Platinum Extra",
+    "family_code": "ce36962f-c56d-4568-9195-24cc61d4d703"
+  },
+  {
+    "name": "Bebas Puas",
+    "family_code": "d0a349a7-0b3a-4552-bc1d-3fd9ac0a17ee"
+  },
+  {
+    "name": "Voucher Unipin",
+    "family_code": "ddb656bd-442a-4791-85b9-0b01e3a65330"
+  },
+  {
+    "name": "Xtra Combo Plus",
+    "family_code": "e0f9605b-5dad-486e-a378-cf40d5b7f2ba"
+  },
+  {
+    "name": "Vidio Ultimate",
+    "family_code": "e2dbb9ed-bc4c-4d09-9e1f-78d54ec9917d"
+  },
+  {
+    "name": "Fav Roaming Data",
+    "family_code": "eff1d7c3-b780-40f5-88cd-5e2c7f34ccd3"
+  },
+  {
+    "name": "Kuota Gaming",
+    "family_code": "fc77cc03-4b05-4e79-8e42-5308c3f81fd1"
+  },
+  {
+    "name": "XL PASS",
+    "family_code": "fff99b6b-5a5d-4ba4-a55b-38f6aca6f91d"
+  }
+]

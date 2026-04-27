@@ -43,6 +43,7 @@ define Package/engsel/install
 	$(INSTALL_DATA) ./files/etc/engsel/.env $(1)/etc/engsel/.env
 	$(INSTALL_DATA) ./files/etc/engsel/refresh-tokens.json $(1)/etc/engsel/refresh-tokens.json
 	$(INSTALL_DATA) ./files/etc/engsel/bookmark.json $(1)/etc/engsel/bookmark.json
+	$(INSTALL_DATA) ./files/etc/engsel/family_bookmark.json $(1)/etc/engsel/family_bookmark.json
 
 	$(INSTALL_DIR) $(1)/etc/engsel/hot_data
 	$(INSTALL_DATA) ./files/etc/engsel/hot_data/hot.json $(1)/etc/engsel/hot_data/hot.json
@@ -57,6 +58,7 @@ define Package/engsel/conffiles
 /etc/engsel/.env
 /etc/engsel/refresh-tokens.json
 /etc/engsel/bookmark.json
+/etc/engsel/family_bookmark.json
 endef
 
 $(eval $(call BuildPackage,engsel))
