@@ -390,5 +390,13 @@
   {
     "name": "XL SATU Shared Quota",
     "family_code": "69c4a625-5c9a-4241-befa-fac1d3692dbb"
+  },
+  {
+    "name": "Digital Fleetech Promo",
+    "family_code": "6d4e7b40-7502-449d-995e-79acdf0b47ea"
+  },
+  {
+    "name": "myPRIO X Unlimited (alt)",
+    "family_code": "91a2bc04-be5c-43a9-854d-fbab1694519b"
   }
 ]
