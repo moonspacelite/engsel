@@ -342,5 +342,61 @@
   {
     "name": "Entertainment (ADD_ON PRIO banner)",
     "family_code": "720445f2-f7cb-44e4-a8ed-589221822bf3"
+  },
+  {
+    "name": "Akrab",
+    "family_code": "f4fd69c7-12a4-4047-a1f2-f4072a7c543e"
+  },
+  {
+    "name": "Bonus myRewards",
+    "family_code": "07461ed8-8a81-4d89-a8f2-4dd0271efdde"
+  },
+  {
+    "name": "Newcomer Promo",
+    "family_code": "6bc5a34d-7901-4bf9-8629-5bd7de28c89f"
+  },
+  {
+    "name": "PRIO PASS",
+    "family_code": "2512b72a-a3cd-4c70-a736-132cf2c1f0c0"
+  },
+  {
+    "name": "PRIO PASS (alias)",
+    "family_code": "c298651a-2502-42ac-a052-9b97210a831c"
+  },
+  {
+    "name": "ShopeeFood Packages (BIZ)",
+    "family_code": "11adf9c8-7003-447c-98e4-353d33a216b3"
+  },
+  {
+    "name": "Unlimited Turbo",
+    "family_code": "08a3b1e6-8e78-4e45-a540-b40f06871cfe"
+  },
+  {
+    "name": "Video & Music",
+    "family_code": "b50cef3e-fcd0-4699-83a9-6f5740b7ef31"
+  },
+  {
+    "name": "XL PASS (BIZ)",
+    "family_code": "b0a20d74-0c54-4e3b-8f3f-01e7482e50bf"
+  },
+  {
+    "name": "Xtra Combo Flex",
+    "family_code": "3c71892a-852c-4a0f-8cb5-9cf731e26508"
+  },
+  {
+    "name": "Xtra Combo Flex (test)",
+    "family_code": "f59b6f2b-4d77-4443-8361-3b1d3377f09e"
+  },
+  {
+    "name": "XL SATU Shared Quota",
+    "family_code": "69c4a625-5c9a-4241-befa-fac1d3692dbb"
+  },
+  {
+    "name": "Digital Fleetech Promo",
+    "family_code": "6d4e7b40-7502-449d-995e-79acdf0b47ea"
+  },
+  {
+    "name": "myPRIO X Unlimited (alt)",
+    "family_code": "91a2bc04-be5c-43a9-854d-fbab1694519b"
   }
 ]
