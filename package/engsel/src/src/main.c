@@ -996,7 +996,6 @@ static void cli_print_help(const char* argv0) {
 "  %s --list-account       Daftar akun yang tersimpan di refresh-tokens.json\n"
 "  %s --list-autobuy       Daftar entry Auto Buy aktif\n"
 "  %s --list-decoy         Daftar Custom Decoy tersimpan\n"
-"  %s --list-family        Daftar Family Code tersimpan\n"
 "  %s --list-hot           Daftar paket HOT (hot_data/hot.json)\n"
 "\n"
 "Panduan menu interaktif:\n"
@@ -1012,18 +1011,18 @@ static void cli_print_help(const char* argv0) {
 "\n"
 "  Fitur Lanjutan (menu 8)\n"
 "    1  Circle                  2  Family Plan / Akrab Organizer\n"
-"    3  Transfer Pulsa          4  Simpan Family Code (85 default)\n"
+"    3  Transfer Pulsa          4  Verify Active Package (legit/decoy)\n"
 "    5  Custom Decoy            6  Custom Paket HOT\n"
 "    7  Auto Buy                8  Discovery (search/rekomendasi/banner\n"
 "                                              /rewards/scan/detail)\n"
+"    9  Migrasi & Kontrak (PRIO/HYBRID/MPD)\n"
 "\n"
-"  Aksi di sub-menu (Simpan Family / Custom Decoy / Custom HOT / Auto Buy)\n"
+"  Aksi di sub-menu (Custom Decoy / Custom HOT / Auto Buy)\n"
 "    add                       Tambah entry baru\n"
 "    del <n>                   Hapus entry ke-n\n"
 "    toggle <n>                Aktifkan/nonaktifkan entry ke-n (Auto Buy)\n"
 "    use <n>                   Jadikan entry aktif (Custom Decoy)\n"
-"    import                    Import 85 family code bawaan (Simpan Family)\n"
-"    reset                     Kembalikan ke bawaan (Custom HOT/Simpan Family)\n"
+"    reset                     Kembalikan ke bawaan (Custom HOT)\n"
 "    start / stop              Jalankan/matikan worker (Auto Buy)\n"
 "    log                       Tail log terakhir (Auto Buy)\n"
 "    00                        Kembali ke menu sebelumnya\n"
@@ -1033,7 +1032,6 @@ static void cli_print_help(const char* argv0) {
 "  /etc/engsel/.env                     kredensial API (API_KEY, dll)\n"
 "  /etc/engsel/refresh-tokens.json      sesi login multi-akun\n"
 "  /etc/engsel/bookmark.json            paket yang di-bookmark\n"
-"  /etc/engsel/family_bookmark.json     daftar Simpan Family Code\n"
 "  /etc/engsel/custom_decoy.json        daftar Custom Decoy\n"
 "  /etc/engsel/auto_buy.json            entry Auto Buy\n"
 "  /etc/engsel/hot_data/hot.json        paket HOT\n"
@@ -1047,7 +1045,7 @@ static void cli_print_help(const char* argv0) {
 "Opsi lingkungan:\n"
 "  ENGSEL_DEBUG=1            tampilkan detail signature ax-api (diagnostik)\n",
         ENGSEL_VERSION, argv0, argv0, argv0, argv0,
-        argv0, argv0, argv0, argv0, argv0);
+        argv0, argv0, argv0, argv0);
 }
 
 static void cli_list_account(void) {
@@ -1128,12 +1126,6 @@ static void cli_list_decoy(void) {
                                f, (int)(sizeof(f)/sizeof(f[0])));
 }
 
-static void cli_list_family(void) {
-    const char* f[] = {"name", "family_code", "migration_type"};
-    cli_list_json_array_field("/etc/engsel/family_bookmark.json", "family_bookmark",
-                               f, (int)(sizeof(f)/sizeof(f[0])));
-}
-
 static void cli_list_hot(void) {
     const char* f[] = {"family_name", "option_name", "family_code",
                        "variant_name", "order"};
@@ -1159,7 +1151,6 @@ int main(int argc, char** argv) {
         if (strcmp(argv[i], "--list-account") == 0) { cli_list_account(); return 0; }
         if (strcmp(argv[i], "--list-autobuy") == 0) { cli_list_autobuy(); return 0; }
         if (strcmp(argv[i], "--list-decoy")   == 0) { cli_list_decoy();   return 0; }
-        if (strcmp(argv[i], "--list-family")  == 0) { cli_list_family();  return 0; }
         if (strcmp(argv[i], "--list-hot")     == 0) { cli_list_hot();     return 0; }
         if (strcmp(argv[i], "--auto-buy")     == 0) auto_buy_mode = 1;
         else if (argv[i][0] == '-') {
