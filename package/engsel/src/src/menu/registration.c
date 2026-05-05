@@ -634,7 +634,7 @@ void registration_menu(const char* base_api,
         printf("  -- AUTO PILOT --\n");
         printf("  W. WIZARD PINTAR (auto-pilih flow optimal)\n");
         printf("\n");
-        printf("  99. Kembali ke menu utama\n");
+        printf("  00. Kembali / 99. Menu utama\n");
         printf("\n");
         printf("Pilih: ");
         fflush(stdout);
@@ -644,6 +644,7 @@ void registration_menu(const char* base_api,
         buf[strcspn(buf, "\n")] = '\0';
 
         if      (strcmp(buf, "99") == 0)               return;
+        else if (strcmp(buf, "00") == 0)               return;
         else if (strcmp(buf, "1")  == 0) sub_get_info(base_api, api_key, xdata_key, x_api_secret, id_token);
         else if (strcmp(buf, "2")  == 0) sub_check_dukcapil(base_api, api_key, xdata_key, x_api_secret, id_token);
         else if (strcmp(buf, "3")  == 0) sub_validate_puk(base_api, api_key, xdata_key, x_api_secret, id_token);
