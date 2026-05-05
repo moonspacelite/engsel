@@ -799,15 +799,20 @@ const char* register_error_message(const char* code) {
 cJSON* validate_msisdn(const char* base_url, const char* api_key,
                        const char* xdata_key, const char* api_secret,
                        const char* id_token, const char* msisdn) {
+    /* Post-maintenance: check-dukcapil juga butuh envelope `{"data": {...}}`
+     * sama seperti endpoint registrasi lain. Tanpa wrapper, response 111
+     * REQUEST_BODY_MALFORMED. */
+    cJSON* inner = cJSON_CreateObject();
+    cJSON_AddBoolToObject(inner, "with_bizon", 1);
+    cJSON_AddBoolToObject(inner, "with_family_plan", 1);
+    cJSON_AddBoolToObject(inner, "is_enterprise", 0);
+    cJSON_AddBoolToObject(inner, "with_optimus", 1);
+    cJSON_AddStringToObject(inner, "lang", "en");
+    cJSON_AddStringToObject(inner, "msisdn", msisdn ? msisdn : "");
+    cJSON_AddBoolToObject(inner, "with_regist_status", 1);
+    cJSON_AddBoolToObject(inner, "with_enterprise", 1);
     cJSON* p = cJSON_CreateObject();
-    cJSON_AddBoolToObject(p, "with_bizon", 1);
-    cJSON_AddBoolToObject(p, "with_family_plan", 1);
-    cJSON_AddBoolToObject(p, "is_enterprise", 0);
-    cJSON_AddBoolToObject(p, "with_optimus", 1);
-    cJSON_AddStringToObject(p, "lang", "en");
-    cJSON_AddStringToObject(p, "msisdn", msisdn ? msisdn : "");
-    cJSON_AddBoolToObject(p, "with_regist_status", 1);
-    cJSON_AddBoolToObject(p, "with_enterprise", 1);
+    cJSON_AddItemToObject(p, "data", inner);
     cJSON* r = send_api_request(base_url, api_key, xdata_key, api_secret,
                                 "api/v8/auth/check-dukcapil", p,
                                 id_token, "POST", NULL);

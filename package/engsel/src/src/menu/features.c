@@ -1257,7 +1257,7 @@ void show_features_menu(const char* base_api, const char* api_key,
                                 id_token);
         else if (strcmp(ch, "9") == 0)
             migration_menu(base_api, api_key, xdata_key, x_api_secret,
-                           id_token, my_msisdn);
+                           id_token, access_token, my_msisdn);
         /* Kalau sub-menu minta unwind ke main (user pilih "99"), propagate. */
         if (nav_should_return()) return;
     }

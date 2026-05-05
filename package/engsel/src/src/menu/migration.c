@@ -90,6 +90,7 @@ static int mig_confirm_typed(const char* required) {
 
 static void mig_check_status(const char* base, const char* key, const char* xdata,
                              const char* sec, const char* id_token,
+                             const char* access_token,
                              const char* my_msisdn) {
     mig_clear();
     printf("=======================================================\n");
@@ -99,7 +100,7 @@ static void mig_check_status(const char* base, const char* key, const char* xdat
     printf("Subscription    : %s\n", active_subs_type[0] ? active_subs_type : "UNKNOWN");
     printf("\n[*] Memanggil /api/v8/profile untuk verifikasi server-side...\n");
 
-    cJSON* prof = get_profile(base, key, xdata, sec, id_token, NULL);
+    cJSON* prof = get_profile(base, key, xdata, sec, id_token, access_token);
     if (prof) {
         cJSON* data = cJSON_GetObjectItem(prof, "data");
         if (data) {
@@ -618,7 +619,8 @@ static void mig_priohybrid_status(const char* base, const char* key,
 
 void migration_menu(const char* base_api, const char* api_key,
                     const char* xdata_key, const char* x_api_secret,
-                    const char* id_token, const char* my_msisdn) {
+                    const char* id_token, const char* access_token,
+                    const char* my_msisdn) {
     if (!id_token || !id_token[0]) {
         printf("[-] Belum login.\n");
         return;
@@ -662,7 +664,7 @@ void migration_menu(const char* base_api, const char* api_key,
         else if (strcmp(ch, "99") == 0) { nav_trigger_goto_main(); return; }
         else if (strcmp(ch, "1") == 0)
             mig_check_status(base_api, api_key, xdata_key, x_api_secret,
-                             id_token, my_msisdn);
+                             id_token, access_token, my_msisdn);
         else if (strcmp(ch, "2") == 0)
             mig_check_priohybrid_eligibility(base_api, api_key, xdata_key,
                                              x_api_secret, id_token);

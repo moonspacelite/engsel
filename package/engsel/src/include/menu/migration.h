@@ -19,6 +19,7 @@ void migration_menu(const char* base_api,
                     const char* xdata_key,
                     const char* x_api_secret,
                     const char* id_token,
+                    const char* access_token,
                     const char* my_msisdn);
 
 /* Verify Active Package: cek apakah paket aktif di /balance-and-credit
