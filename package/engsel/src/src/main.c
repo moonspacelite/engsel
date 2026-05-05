@@ -14,6 +14,7 @@
 #include "../include/client/http_client.h"
 #include "../include/menu/features.h"
 #include "../include/menu/history.h"
+#include "../include/menu/registration.h"
 #include "../include/menu/store_browse.h"
 #include "../include/menu/purchase_flow.h"
 #include "../include/menu/auto_buy.h"
@@ -2014,7 +2015,7 @@ int main(int argc, char** argv) {
             if (!is_logged_in) { printf("\n[-] Anda harus login terlebih dahulu!\nTekan Enter..."); fflush(stdout); flush_stdin(); continue; }
             ensure_token_fresh(tokens_arr, B_CIAM, B_API, B_AUTH, UA, API_KEY, XDATA_KEY, X_API_SEC);
             if (!is_logged_in) continue;
-            show_register_menu(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
+            registration_menu(B_API, API_KEY, XDATA_KEY, X_API_SEC, id_tok);
         }
         else if (strcmp(choice, "s") == 0 || strcmp(choice, "S") == 0) {
             /* Shortcut ke Discovery Menu — karena user sering butuh search
