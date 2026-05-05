@@ -103,10 +103,11 @@ static void mig_check_status(const char* base, const char* key, const char* xdat
     cJSON* prof = get_profile(base, key, xdata, sec, id_token, access_token);
     if (prof) {
         cJSON* data = cJSON_GetObjectItem(prof, "data");
-        if (data) {
-            printf("  - subscription_type : %s\n", json_get_str(data, "subscription_type", "?"));
-            printf("  - profile.status    : %s\n", json_get_str(data, "status", "?"));
-            cJSON* contact = cJSON_GetObjectItem(data, "contact");
+        cJSON* profile = data ? cJSON_GetObjectItem(data, "profile") : NULL;
+        if (profile) {
+            printf("  - subscription_type : %s\n", json_get_str(profile, "subscription_type", "?"));
+            printf("  - profile.status    : %s\n", json_get_str(profile, "status", "?"));
+            cJSON* contact = cJSON_GetObjectItem(profile, "contact");
             if (contact) {
                 printf("  - email             : %s\n", json_get_str(contact, "email", "(belum set)"));
             }

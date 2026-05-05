@@ -450,11 +450,17 @@ static void sub_wizard(const char* base, const char* api_key,
     }
 
     int already_registered = (status && strcmp(status, "REGISTERED") == 0);
+    /* status/name/dnik/dkk masih point ke string di tree `info`. Salin
+     * ke buffer lokal sebelum cJSON_Delete supaya tidak use-after-free. */
+    char name_copy[128] = {0};
+    if (name && name[0]) {
+        snprintf(name_copy, sizeof(name_copy), "%s", name);
+    }
     cJSON_Delete(info);
 
     if (already_registered) {
         printf("\n[!] Status: SUDAH REGISTERED (atas nama %s).\n",
-               name && name[0] ? name : "tidak diketahui");
+               name_copy[0] ? name_copy : "tidak diketahui");
         printf("    Anda mau re-pair ke NIK lain? Ini butuh PUK SIM.\n");
         char ans[8];
         read_line("Lanjut re-pair? (y/N): ", ans, sizeof(ans));
