@@ -728,15 +728,20 @@ cJSON* get_pending_payments(const char* base_url, const char* api_key,
     return r;
 }
 
+/* Wrapper post-maintenance: server sekarang ekspektasi `{"data": {...}}`
+ * envelope. Tanpa wrapper, semua endpoint registrasi return code 111
+ * REQUEST_BODY_MALFORMED. Confirmed via live API testing 2026-05-05. */
 cJSON* dukcapil_register(const char* base_url, const char* api_key,
                         const char* xdata_key, const char* api_secret,
                         const char* id_token,
                         const char* msisdn, const char* kk, const char* nik) {
+    cJSON* inner = cJSON_CreateObject();
+    cJSON_AddStringToObject(inner, "msisdn", msisdn ? msisdn : "");
+    cJSON_AddStringToObject(inner, "kk", kk ? kk : "");
+    cJSON_AddStringToObject(inner, "nik", nik ? nik : "");
+    cJSON_AddStringToObject(inner, "lang", "en");
     cJSON* p = cJSON_CreateObject();
-    cJSON_AddStringToObject(p, "msisdn", msisdn ? msisdn : "");
-    cJSON_AddStringToObject(p, "kk", kk ? kk : "");
-    cJSON_AddStringToObject(p, "nik", nik ? nik : "");
-    cJSON_AddStringToObject(p, "lang", "en");
+    cJSON_AddItemToObject(p, "data", inner);
     cJSON* r = send_api_request(base_url, api_key, xdata_key, api_secret,
                                 "api/v8/auth/regist/dukcapil", p,
                                 id_token ? id_token : "", "POST", NULL);
@@ -747,8 +752,10 @@ cJSON* dukcapil_register(const char* base_url, const char* api_key,
 cJSON* get_registration_info(const char* base_url, const char* api_key,
                              const char* xdata_key, const char* api_secret,
                              const char* id_token, const char* msisdn) {
+    cJSON* inner = cJSON_CreateObject();
+    cJSON_AddStringToObject(inner, "msisdn", msisdn ? msisdn : "");
     cJSON* p = cJSON_CreateObject();
-    cJSON_AddStringToObject(p, "msisdn", msisdn ? msisdn : "");
+    cJSON_AddItemToObject(p, "data", inner);
     cJSON* r = send_api_request(base_url, api_key, xdata_key, api_secret,
                                 "api/v8/infos/regist/info", p,
                                 id_token ? id_token : "", "POST", NULL);
@@ -792,15 +799,20 @@ const char* register_error_message(const char* code) {
 cJSON* validate_msisdn(const char* base_url, const char* api_key,
                        const char* xdata_key, const char* api_secret,
                        const char* id_token, const char* msisdn) {
+    /* Post-maintenance: check-dukcapil juga butuh envelope `{"data": {...}}`
+     * sama seperti endpoint registrasi lain. Tanpa wrapper, response 111
+     * REQUEST_BODY_MALFORMED. */
+    cJSON* inner = cJSON_CreateObject();
+    cJSON_AddBoolToObject(inner, "with_bizon", 1);
+    cJSON_AddBoolToObject(inner, "with_family_plan", 1);
+    cJSON_AddBoolToObject(inner, "is_enterprise", 0);
+    cJSON_AddBoolToObject(inner, "with_optimus", 1);
+    cJSON_AddStringToObject(inner, "lang", "en");
+    cJSON_AddStringToObject(inner, "msisdn", msisdn ? msisdn : "");
+    cJSON_AddBoolToObject(inner, "with_regist_status", 1);
+    cJSON_AddBoolToObject(inner, "with_enterprise", 1);
     cJSON* p = cJSON_CreateObject();
-    cJSON_AddBoolToObject(p, "with_bizon", 1);
-    cJSON_AddBoolToObject(p, "with_family_plan", 1);
-    cJSON_AddBoolToObject(p, "is_enterprise", 0);
-    cJSON_AddBoolToObject(p, "with_optimus", 1);
-    cJSON_AddStringToObject(p, "lang", "en");
-    cJSON_AddStringToObject(p, "msisdn", msisdn ? msisdn : "");
-    cJSON_AddBoolToObject(p, "with_regist_status", 1);
-    cJSON_AddBoolToObject(p, "with_enterprise", 1);
+    cJSON_AddItemToObject(p, "data", inner);
     cJSON* r = send_api_request(base_url, api_key, xdata_key, api_secret,
                                 "api/v8/auth/check-dukcapil", p,
                                 id_token, "POST", NULL);
